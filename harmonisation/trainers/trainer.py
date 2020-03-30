@@ -80,10 +80,14 @@ class BaseTrainer():
 
         return metrics_epoch
 
-    def get_batch_loss(self, data):
+    def get_batch_loss(self, X, mask, Z=None):
         """ Single forward and backward pass """
 
-        X, mask = data
+        if Z is None:
+            # If Z is not already given
+            X = X.to(self.net.device)
+            Z = self.net(X)
+
         X = X.to(self.net.device)
         mask = mask.to(self.net.device)
         Z = self.net.forward(X)
@@ -146,7 +150,8 @@ class BaseTrainer():
                     # Set network to train mode
                     self.net.train()
 
-                    batch_loss = self.get_batch_loss(data)
+                    X, mask = data
+                    batch_loss = self.get_batch_loss(X, mask)
 
                     epoch_loss_train += batch_loss.item()
 
