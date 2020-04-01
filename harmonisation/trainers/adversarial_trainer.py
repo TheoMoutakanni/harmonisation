@@ -19,11 +19,11 @@ class AdversarialTrainer(BaseTrainer):
                  adv_net,
                  optimizer_parameters={
                      "autoencoder": {
-                         "lr": 0.001,
+                         "lr": 0.01,
                          "weight_decay": 1e-8,
                      },
                      "adversarial": {
-                         "lr": 0.001,
+                         "lr": 0.01,
                          "weight_decay": 1e-8,
                      }
                  },

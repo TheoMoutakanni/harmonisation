@@ -38,8 +38,8 @@ class InitialBlock(nn.Module):
             activation = nn.PReLU
 
         # Main branch - As stated above the number of output channels for this
-        # branch is the total minus 3, since the remaining channels come from
-        # the extension branch
+        # branch is the total minus in_channels, since the remaining channels
+        # come from the extension branch
         self.main_branch = nn.Conv3d(
             in_channels,
             out_channels - in_channels,
@@ -146,7 +146,8 @@ class RegularBottleneck(nn.Module):
                 internal_channels,
                 kernel_size=1,
                 stride=1,
-                bias=bias), nn.BatchNorm3d(internal_channels), activation())
+                bias=bias),
+            nn.BatchNorm3d(internal_channels), activation())
 
         # If the convolution is asymmetric we split the main convolution in
         # two. Eg. for a 5x5 asymmetric convolution we have two convolution:
@@ -203,7 +204,8 @@ class RegularBottleneck(nn.Module):
                 channels,
                 kernel_size=1,
                 stride=1,
-                bias=bias), nn.BatchNorm3d(channels), activation())
+                bias=bias),
+            nn.BatchNorm3d(channels), activation())
 
         self.ext_regul = nn.Dropout3d(p=dropout_prob)
 
@@ -518,6 +520,17 @@ class ENet(BaseNet):
             64, padding=1, dropout_prob=0.01, relu=encoder_relu)
 
         # Stage 2 - Encoder
+
+        self.replace_down = nn.Sequential(
+            nn.Conv3d(
+                64,
+                embed,
+                kernel_size=1,
+                stride=1,
+                bias=True),
+            nn.BatchNorm3d(embed),
+            nn.ReLU())
+
         self.downsample2_0 = DownsamplingBottleneck(
             64,
             embed,
@@ -580,6 +593,16 @@ class ENet(BaseNet):
             embed, dilation=16, padding=16, dropout_prob=0.1, relu=encoder_relu)
 
         # Stage 4 - Decoder
+        self.replace_up = nn.Sequential(
+            nn.Conv3d(
+                embed,
+                64,
+                kernel_size=1,
+                stride=1,
+                bias=True),
+            nn.BatchNorm3d(64),
+            nn.ReLU())
+
         self.upsample4_0 = UpsamplingBottleneck(
             embed, 64, dropout_prob=0.1, relu=decoder_relu)
         self.regular4_1 = RegularBottleneck(
@@ -620,7 +643,9 @@ class ENet(BaseNet):
 
         # Stage 2 - Encoder
         stage2_input_size = x.size()
-        x, max_indices2_0 = self.downsample2_0(x)
+        # x, max_indices2_0 = self.downsample2_0(x)
+        x = self.replace_down(x)
+
         x = self.regular2_1(x)
         x = self.dilated2_2(x)
         x = self.asymmetric2_3(x)
@@ -629,6 +654,7 @@ class ENet(BaseNet):
         x = self.dilated2_6(x)
         x = self.asymmetric2_7(x)
         x = self.dilated2_8(x)
+
         # Stage 3 - Encoder
         # x = self.regular3_0(x)
         # x = self.dilated3_1(x)
@@ -640,7 +666,9 @@ class ENet(BaseNet):
         # x = self.dilated3_7(x)
 
         # Stage 4 - Decoder
-        x = self.upsample4_0(x, max_indices2_0, output_size=stage2_input_size)
+        # x = self.upsample4_0(x, max_indices2_0, output_size=stage2_input_size)
+        x = self.replace_up(x)
+
         x = self.regular4_1(x)
         x = self.regular4_2(x)
 

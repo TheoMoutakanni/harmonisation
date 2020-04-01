@@ -28,16 +28,18 @@ train_dataset = SHDataset(path_train,
                           patch_size=SIGNAL_PARAMETERS["patch_size"],
                           signal_parameters=SIGNAL_PARAMETERS,
                           transformations=None,
-                          n_jobs=4,
+                          normalize_data=True,
+                          n_jobs=8,
                           cache_dir="./")
 
 test_dataset = SHDataset(path_validation,
                          patch_size=SIGNAL_PARAMETERS["patch_size"],
                          signal_parameters=SIGNAL_PARAMETERS,
                          transformations=None,
+                         normalize_data=True,
                          mean=train_dataset.mean,
                          std=train_dataset.std,
-                         n_jobs=4,
+                         n_jobs=8,
                          cache_dir="./")
 
 net = ENet(patch_size=SIGNAL_PARAMETERS["patch_size"],
@@ -56,17 +58,17 @@ trainer = BaseTrainer(
         "weight_decay": 1e-8,
     },
     loss_specs={
-        "type": "mse",
+        "type": "acc_mse",
         "parameters": {}
     },
     metrics=["acc", "mse"],
-    metric_to_maximize="mse",
+    metric_to_maximize="acc",
     patience=100,
     save_folder=None,
 )
 
 trainer.train(train_dataset,
               test_dataset,
-              num_epochs=501,
-              batch_size=128,
+              num_epochs=101,
+              batch_size=16,
               validation=True)

@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from dipy.reconst.shm import sph_harm_ind_list, order_from_ncoef
+
 
 def torch_norm(vect):
     return torch.sqrt(torch.sum(vect**2, axis=-1))
@@ -23,6 +25,15 @@ def torch_accuracy(labels, proba):
     predicted = (proba > 0.5).float()
     accuracy = (predicted == labels).float().mean()
     return accuracy
+
+
+def torch_RIS(X):
+    sh_order = order_from_ncoef(X.shape[-1])
+    m, n = sph_harm_ind_list(sh_order)
+    RIS = []
+    for i in np.arange(sh_order // 2 + 1) * 2:
+        RIS.append(X[..., n == i].sum(-1))
+    return torch.stack(RIS).permute(*range(1, len(X.shape)), 0)
 
 
 def get_metrics_fun():

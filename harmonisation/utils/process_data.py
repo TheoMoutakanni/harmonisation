@@ -34,7 +34,7 @@ def process_data(path_dict, gtab, signal_parameters):
 
     mask = np.pad(mask,
                   pad_width=[(0, x) for x in pad_needed],
-                  mode="edge")
+                  constant_values=0)
 
     # (x, y, z, sh)
     shm_coeff = torch.FloatTensor(shm_coeff)

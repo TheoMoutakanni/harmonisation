@@ -1,1 +1,1 @@
-from .viz import print_peaks, print_acc
+from .viz import print_peaks, print_acc, print_RIS

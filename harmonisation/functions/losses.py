@@ -34,7 +34,7 @@ def loss_acc():
     def loss(X, Z, mask):
         acc = torch_angular_corr_coeff(X + 1e-8, Z + 1e-8)
         acc = 1 - weighted_mean(acc, mask.squeeze()).mean()
-        return loss
+        return acc
     return loss
 
 

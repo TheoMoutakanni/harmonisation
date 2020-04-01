@@ -28,6 +28,7 @@ train_dataset = SHDataset(path_train,
                           patch_size=SIGNAL_PARAMETERS["patch_size"],
                           signal_parameters=SIGNAL_PARAMETERS,
                           transformations=None,
+                          normalize_data=True,
                           n_jobs=4,
                           cache_dir="./")
 
@@ -35,6 +36,7 @@ test_dataset = SHDataset(path_validation,
                          patch_size=SIGNAL_PARAMETERS["patch_size"],
                          signal_parameters=SIGNAL_PARAMETERS,
                          transformations=None,
+                         normalize_data=True,
                          mean=train_dataset.mean,
                          std=train_dataset.std,
                          n_jobs=4,
@@ -60,14 +62,6 @@ adv_trainer = AdversarialTrainer(
     adv_net,
     **DATASET_PARAMETERS
 )
-
-# Train both networks each epoch
-
-adv_trainer.train_both(train_dataset,
-                       test_dataset,
-                       num_epochs=501,
-                       batch_size=128,
-                       validation=True)
 
 
 # Train multiple epoch each network separately
@@ -109,3 +103,11 @@ adv_trainer.train(train_dataset,
                   num_epochs=501,
                   batch_size=128,
                   validation=True)
+
+# Train both networks each epoch
+
+adv_trainer.train_both(train_dataset,
+                       test_dataset,
+                       num_epochs=501,
+                       batch_size=128,
+                       validation=True)
