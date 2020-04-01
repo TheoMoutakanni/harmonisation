@@ -37,19 +37,14 @@ class SHDataset(torch.utils.data.Dataset):
             path_dict["bval"], path_dict["bvec"]))
             for path_dict in path_dicts]
 
-        def gen():
-            for path_dict, gtab in tqdm.tqdm(zip(path_dicts, self.gtabs),
-                                             total=len(path_dicts)):
-                # print(path_dict['name'])
-                yield path_dict, gtab
-
         self.data = Parallel(
             n_jobs=n_jobs,
             prefer="threads")(delayed(get_data)(
                 path_dict=path_dict,
                 gtab=gtab,
                 signal_parameters=signal_parameters,
-            ) for path_dict, gtab in gen())
+            ) for path_dict, gtab in tqdm.tqdm(zip(path_dicts, self.gtabs),
+                                               total=len(path_dicts)))
 
         self.name_to_idx = {name: idx for idx, name in enumerate(self.names)}
         self.dataset_indexes = [(i, j) for i, d in enumerate(self.data)
