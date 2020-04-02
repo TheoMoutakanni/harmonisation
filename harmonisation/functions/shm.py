@@ -51,7 +51,7 @@ def sh_to_dwi(data_sh, gtab, mask=None):
     data_dwi = np.dot(data_sh, B.T).clip(mini, maxi)
 
     if mask is not None:
-        mask = np.asarray(mask, dtype=bool)
+        mask = np.asarray(mask, dtype=bool).squeeze()
         data_dwi *= mask[..., None]
 
     return data_dwi

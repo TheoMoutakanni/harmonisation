@@ -6,6 +6,8 @@ import numpy as np
 import copy
 from tqdm import tqdm
 
+import matplotlib.pyplot as plt
+
 from harmonisation.functions.metrics import compute_metrics_dataset
 from harmonisation.functions.losses import get_loss_fun
 from harmonisation.datasets import AdversarialDataset
@@ -66,7 +68,7 @@ class AdversarialTrainer(BaseTrainer):
         self.patience = patience
         self.save_folder = save_folder
 
-    def validate_adv(self, epoch, dataset):
+    def validate_adv(self, dataset):
         """
         Compute metrics on validation_dataset and print some metrics
         """
@@ -121,6 +123,7 @@ class AdversarialTrainer(BaseTrainer):
         batch_loss_reconst = self.loss(X, Z, mask)
         labels = torch.zeros(Z.shape[0]).unsqueeze(1).to(self.adv_net.device)
 
+        self.adv_net.eval()
         proba = self.adv_net.forward(Z)
         batch_loss_adv = self.adv_loss(proba, labels)
 
@@ -200,8 +203,8 @@ class AdversarialTrainer(BaseTrainer):
             epoch_loss_train /= (i + 1)
 
             with torch.no_grad():
-                metrics_epoch = self.validate_adv(epoch, validation_dataset)
-                metrics_train = self.validate_adv(epoch, train_dataset)
+                metrics_epoch = self.validate_adv(validation_dataset)
+                metrics_train = self.validate_adv(train_dataset)
 
             if self.save_folder:
                 self.adv_net.save(self.save_folder + str(epoch) + "_advnet")
@@ -252,6 +255,9 @@ class AdversarialTrainer(BaseTrainer):
             metric: -np.inf
             for metric in self.metrics
         }
+
+        logger_metrics = {metric: [] for metric in metrics_epoch.keys()}
+        logger_accuracy = []
 
         best_value = metrics_final[self.metric_to_maximize]
         best_net = copy.deepcopy(self.net)
@@ -309,9 +315,15 @@ class AdversarialTrainer(BaseTrainer):
             epoch_loss_train /= (i + 1)
 
             with torch.no_grad():
-                metrics_epoch = self.validate(epoch, validation_dataset)
-                metrics_epoch_adv = self.validate_adv(
-                    epoch, validation_dataset)
+                metrics_epoch = self.validate(validation_dataset)
+                metrics_epoch_adv = self.validate_adv(validation_dataset)
+
+                for metric in metrics_epoch.keys():
+                    logger_metrics[metric].append(metrics_epoch[metric])
+                logger_accuracy.append(metrics_epoch_adv["accuracy"])
+
+                if epoch % 100 == 0:  # and epoch != 0:
+                    self.print_metrics(validation_dataset)
 
             if self.save_folder:
                 self.adv_net.save(self.save_folder + str(epoch) + "_advnet")
@@ -331,5 +343,14 @@ class AdversarialTrainer(BaseTrainer):
 
             if counter_patience > self.patience:
                 break
+
+        for metric in logger_metrics.keys():
+            plt.figure()
+            plt.title(metric)
+            plt.plot(logger_metrics[metric])
+            if metric == "acc":
+                plt.plot(logger_accuracy)
+                plt.legend(["ACC", "accuracy_adv"])
+        plt.show()
 
         return best_net, best_adv_net, metrics_final

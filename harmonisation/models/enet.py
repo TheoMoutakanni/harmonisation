@@ -495,7 +495,12 @@ class ENet(BaseNet):
                  embed=128,
                  encoder_relu=False,
                  decoder_relu=True):
-        super().__init__()
+
+        super().__init__(patch_size=patch_size,
+                         sh_order=sh_order,
+                         embed=128,
+                         encoder_relu=False,
+                         decoder_relu=True)
 
         self.ncoef = int((sh_order + 2) * (sh_order + 1) / 2)
         self.patch_size = patch_size

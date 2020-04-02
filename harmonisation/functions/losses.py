@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .metrics import torch_angular_corr_coeff
+from .metrics import *
 
 
 def nanmean(v, inplace=False, *args, **kwargs):
@@ -13,6 +13,7 @@ def nanmean(v, inplace=False, *args, **kwargs):
 
 
 def weighted_mse_loss(X, Z, weight):
+    """Overcomplicated to remove nans with div by 0 ... """
     batch = X.shape[0]
     weigth_sum = weight.view(batch, -1).sum(1)
     loss = ((X - Z)**2 * weight).view(batch, -1).sum(1)
@@ -55,6 +56,20 @@ def loss_acc_mse(alpha=0.5):
     return loss
 
 
+def loss_mse_gfa():
+    def loss(X, Z, mask):
+        mse_gfa = torch_mse_gfa(X, Z, mask)
+        return mse_gfa
+    return loss
+
+
+def loss_mse_RIS():
+    def loss(X, Z, mask):
+        mse_RIS = torch_mse_RIS(X, Z, mask)
+        return mse_RIS
+    return loss
+
+
 def get_loss_fun(loss_specs):
     if loss_specs["type"] == "acc":
         return loss_acc(**loss_specs["parameters"])
@@ -64,3 +79,7 @@ def get_loss_fun(loss_specs):
         return loss_acc_mse(**loss_specs["parameters"])
     elif loss_specs["type"] == "bce":
         return nn.BCELoss(**loss_specs["parameters"])
+    elif loss_specs["type"] == "mse_gfa":
+        return loss_mse_gfa(**loss_specs["parameters"])
+    elif loss_specs["type"] == "mse_RIS":
+        return loss_mse_RIS(**loss_specs["parameters"])

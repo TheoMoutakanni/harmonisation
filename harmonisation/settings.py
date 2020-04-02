@@ -47,3 +47,11 @@ DATASET_PARAMETERS = {
     "patience": 100,
     "save_folder": None,
 }
+
+# NETWORK_PARAMETERS = {
+#     "patch_size": SIGNAL_PARAMETERS["patch_size"],
+#     "sh_order": SIGNAL_PARAMETERS['sh_order'],
+#     "embed": 128,
+#     "encoder_relu": False,
+#     "decoder_relu": True
+# }

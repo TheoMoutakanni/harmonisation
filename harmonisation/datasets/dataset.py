@@ -33,7 +33,7 @@ class SHDataset(torch.utils.data.Dataset):
                             mmap_mode="r", verbose=0)
             get_data = memory.cache(get_data)
 
-        self.gtabs = [gradient_table(*read_bvals_bvecs(
+        gtabs = [gradient_table(*read_bvals_bvecs(
             path_dict["bval"], path_dict["bvec"]))
             for path_dict in path_dicts]
 
@@ -43,7 +43,7 @@ class SHDataset(torch.utils.data.Dataset):
                 path_dict=path_dict,
                 gtab=gtab,
                 signal_parameters=signal_parameters,
-            ) for path_dict, gtab in tqdm.tqdm(zip(path_dicts, self.gtabs),
+            ) for path_dict, gtab in tqdm.tqdm(zip(path_dicts, gtabs),
                                                total=len(path_dicts)))
 
         self.name_to_idx = {name: idx for idx, name in enumerate(self.names)}

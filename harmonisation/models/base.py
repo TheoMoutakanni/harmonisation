@@ -18,8 +18,11 @@ matplotlib.use('TkAgg')
 
 class BaseNet(nn.Module, object):
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         super(BaseNet, self).__init__()
+
+        # Keep all the __init__parameters for saving/loading
+        self.net_parameters = kwargs
 
     @property
     def device(self):
@@ -30,11 +33,11 @@ class BaseNet(nn.Module, object):
         except Exception:
             return torch.device('cpu')
 
-    def save(self, filename, net_parameters):
+    def save(self, filename):
         with tarfile.open(filename, "w") as tar:
             temporary_directory = tempfile.mkdtemp()
             name = "{}/net_params.json".format(temporary_directory)
-            json.dump(net_parameters, open(name, "w"))
+            json.dump(self.net_parameters, open(name, "w"))
             tar.add(name, arcname="net_params.json")
             name = "{}/state.torch".format(temporary_directory)
             torch.save(self.state_dict(), name)

@@ -36,10 +36,43 @@ def torch_RIS(X):
     return torch.stack(RIS).permute(*range(1, len(X.shape)), 0)
 
 
+def torch_mse_RIS(X, Z, weight):
+    X_RIS = torch_RIS(X)
+    Z_RIS = torch_RIS(Z)
+    mse_RIS = weighted_mse_loss(X_gra, Z_gfa, weight)
+    return mse_RIS.mean()
+
+
+def torch_gfa(X):
+    sh0_index = 0
+
+    X2 = X**2
+    numer = X2[..., sh0_index]
+    denom = X2.sum(-1)
+    # The sum of the square of the coefficients being zero is the same as all
+    # the coefficients being zero
+    allzero = denom == 0
+    # By adding 1 to numer and denom where both and are 0, we prevent 0/0
+    numer = numer + allzero
+    denom = denom + allzero
+    return torch.sqrt(1. - (numer / denom))
+
+
+def torch_mse_gfa(X, Z, weight):
+    X_gfa = torch_gfa(X)
+    Z_gfa = torch_gfa(Z)
+    mse_gfa = weighted_mse_loss(X_gfa, Z_gfa, weight.squeeze())
+    return mse_gfa.mean()
+
+
 def get_metrics_fun():
+    """Return a dict with all the metrics to be computed during an epoch
+    Metrics must be greater when better, so -mse instead of mse for example"""
     return {
         'acc': lambda x, z, mask: torch_angular_corr_coeff(x * mask, z * mask),
         'mse': lambda x, z, mask: -weighted_mse_loss(x, z, mask),
+        'mse_RIS': lambda x, z, mask: -torch_mse_RIS(x, z, mask),
+        'mse_gfa': lambda x, z, mask: -torch_mse_gfa(x, z, mask),
         'accuracy': lambda labels, proba, mask: torch_accuracy(labels, proba)
     }
 

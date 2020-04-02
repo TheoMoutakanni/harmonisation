@@ -13,6 +13,7 @@ from harmonisation.datasets.utils import batch_to_xyz
 
 import matplotlib.pyplot as plt
 
+
 class BaseTrainer():
     def __init__(self,
                  net,
@@ -39,9 +40,9 @@ class BaseTrainer():
         self.patience = patience
         self.save_folder = save_folder
 
-    def validate(self, epoch, validation_dataset):
+    def validate(self, validation_dataset):
         """
-        Compute metrics on validation_dataset and print some metrics
+        Compute metrics on validation_dataset
         """
 
         data_true = {name: validation_dataset.get_data_by_name(name)
@@ -61,7 +62,7 @@ class BaseTrainer():
         return metrics_epoch
 
     def print_metrics(self, validation_dataset):
-        # Print fODF and acc for a slice of a validation dwi
+        # Print fODF, RIS and acc for a slice of a validation dwi
         print_name = validation_dataset.names[0]
         print_data = validation_dataset.get_data_by_name(print_name)
 
@@ -148,6 +149,8 @@ class BaseTrainer():
                     metrics_train=metrics_train[self.metric_to_maximize]
                 )
 
+            # Training
+
             epoch_loss_train = 0.0
 
             with torch.autograd.detect_anomaly():
@@ -173,15 +176,16 @@ class BaseTrainer():
 
             epoch_loss_train /= (i + 1)
 
+            # Validation and print
             with torch.no_grad():
 
-                metrics_epoch = self.validate(epoch, validation_dataset)
-                metrics_train = self.validate(epoch, train_dataset)
+                metrics_epoch = self.validate(validation_dataset)
+                metrics_train = self.validate(train_dataset)
 
                 for metric in metrics_epoch.keys():
                     logger_metrics[metric].append(metrics_epoch[metric])
 
-                if epoch % 100 == 0: # and epoch != 0:
+                if epoch % 100 == 0:  # and epoch != 0:
                     self.print_metrics(validation_dataset)
 
             if self.save_folder:
