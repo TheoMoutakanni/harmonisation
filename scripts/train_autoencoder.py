@@ -63,15 +63,15 @@ trainer = BaseTrainer(
         "type": "mse",
         "parameters": {}
     },
-    metrics=["acc", "mse_gfa"],
-    metric_to_maximize="acc",
+    metrics=["acc", "mse_gfa", "mse"],
+    metric_to_maximize="mse",
     patience=100,
-    save_folder='.saved_models/',
+    save_folder=None,
 )
 
 # Train the network
 trainer.train(train_dataset,
               validation_dataset,
               num_epochs=101,
-              batch_size=16,
+              batch_size=128,
               validation=True)

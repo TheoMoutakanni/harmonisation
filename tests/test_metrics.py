@@ -6,6 +6,7 @@ from os.path import join as pjoin
 from dipy.io.image import load_nifti
 from dipy.io import read_bvals_bvecs
 from dipy.core.gradients import gradient_table
+from dipy.reconst.shm import CsaOdfModel
 
 from harmonisation.functions import metrics
 from harmonisation.functions import shm
@@ -55,27 +56,6 @@ def datas_sh(datas_dwi, gtabs):
             for data, gtab in zip(datas_dwi, gtabs)]
 
 
-def test_angular_corr_coeff(datas_sh):
-    rtol = 1e-05
-    atol = 1e-08
-
-    acc_11 = metrics.angular_corr_coeff(datas_sh[0], datas_sh[0])
-    acc_22 = metrics.angular_corr_coeff(datas_sh[1], datas_sh[1])
-    acc_12 = metrics.angular_corr_coeff(datas_sh[0], datas_sh[1])
-    acc_21 = metrics.angular_corr_coeff(datas_sh[1], datas_sh[0])
-    acc_1n1 = metrics.angular_corr_coeff(datas_sh[0], -datas_sh[0])
-
-    ones = np.ones(acc_11.shape)
-
-    assert np.max(acc_12) <= 1. + atol
-    assert np.min(acc_12) >= -1. - atol
-
-    assert np.isclose(acc_12, acc_21, rtol=rtol, atol=atol).all()
-    assert np.isclose(acc_11, ones, rtol=rtol, atol=atol).all()
-    assert np.isclose(acc_22, ones, rtol=rtol, atol=atol).all()
-    assert np.isclose(acc_1n1, -ones, rtol=rtol, atol=atol).all()
-
-
 def test_torch_angular_corr_coeff(datas_sh):
     rtol = 1e-05
     atol = 1e-08
@@ -90,8 +70,6 @@ def test_torch_angular_corr_coeff(datas_sh):
 
     ones = torch.ones(acc_11.shape)
 
-    print(torch.max(acc_12))
-
     assert torch.max(acc_12) <= 1. + rtol
     assert torch.min(acc_12) >= -1. - rtol
 
@@ -99,3 +77,22 @@ def test_torch_angular_corr_coeff(datas_sh):
     assert torch.isclose(acc_11, ones, rtol=rtol, atol=atol).all()
     assert torch.isclose(acc_22, ones, rtol=rtol, atol=atol).all()
     assert torch.isclose(acc_1n1, -ones, rtol=rtol, atol=atol).all()
+
+
+def test_torch_gfa(datas_dwi, datas_sh, gtabs):
+    rtol = 1e-04
+    atol = 1e-08
+
+    idx = 0
+    data_dwi = datas_dwi[idx][100:140, 100:140, 28:29]
+    data_sh = datas_sh[idx][100:140, 100:140, 28:29]
+    gtab = gtabs[idx]
+
+    csamodel = CsaOdfModel(gtab, 4)
+    csamodel = csamodel.fit(data_dwi)
+    data_sh = csamodel.shm_coeff
+    csagfa = csamodel.gfa
+
+    gfa = metrics.torch_gfa(torch.FloatTensor(data_sh)).numpy()
+
+    assert np.isclose(csagfa, gfa, rtol=rtol, atol=atol).all()

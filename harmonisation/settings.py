@@ -9,7 +9,8 @@ SIGNAL_PARAMETERS = {
             'numpass': 1,
         },
         'sh_params': {
-            'smooth': 0.006,
+            'basis_type': 'descoteaux07',
+            'smooth': 0.006
         }
     }
 }
