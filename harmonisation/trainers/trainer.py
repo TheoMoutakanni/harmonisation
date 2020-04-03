@@ -6,9 +6,9 @@ import numpy as np
 import copy
 from tqdm import tqdm
 
-from harmonisation.functions.metrics import compute_metrics_dataset, torch_RIS
+from harmonisation.functions.metrics import compute_metrics_dataset, torch_RIS, torch_gfa
 from harmonisation.functions.losses import get_loss_fun
-from harmonisation.viz import print_peaks, print_acc, print_RIS
+from harmonisation.viz import print_peaks, print_diff, print_RIS, print_data
 from harmonisation.datasets.utils import batch_to_xyz
 
 import matplotlib.pyplot as plt
@@ -63,29 +63,30 @@ class BaseTrainer():
 
     def print_metrics(self, validation_dataset):
         # Print fODF, RIS and acc for a slice of a validation dwi
-        print_name = validation_dataset.names[0]
-        print_data = validation_dataset.get_data_by_name(print_name)
+        name = validation_dataset.names[0]
+        data = validation_dataset.get_data_by_name(name)
 
         sh_true = batch_to_xyz(
-            print_data['sh'],
-            print_data['number_of_patches']).cpu()
+            data['sh'],
+            data['number_of_patches']).cpu()
         sh_pred = batch_to_xyz(
-            self.net.forward(print_data['sh'].to(self.net.device)),
-            print_data['number_of_patches']).cpu()
+            self.net.forward(data['sh'].to(self.net.device)),
+            data['number_of_patches']).cpu()
         mask = batch_to_xyz(
-            print_data['mask'],
-            print_data['number_of_patches']).cpu()
+            data['mask'],
+            data['number_of_patches']).cpu()
 
-        #print_peaks(sh_true, mask, print_data['gtab'])
-        #print_peaks(sh_pred, mask, print_data['gtab'])
+        # print_peaks(sh_true)
+        # print_peaks(sh_pred)
 
         sh_true = sh_true * validation_dataset.std + validation_dataset.mean
         sh_pred = sh_pred * validation_dataset.std + validation_dataset.mean
 
         print(torch_RIS(sh_true[50:51, 50:51, 28:29]))
         print(torch_RIS(sh_pred[50:51, 50:51, 28:29]))
+        print_data(torch_gfa(sh_true), torch_gfa(sh_pred), mask)
         print_RIS(torch_RIS(sh_true), torch_RIS(sh_pred), mask)
-        print_acc(sh_true * mask, sh_pred * mask)
+        print_diff(sh_true, sh_pred, mask, 'mse', normalize=False)
 
     def get_batch_loss(self, X, mask, Z=None):
         """ Single forward and backward pass """
