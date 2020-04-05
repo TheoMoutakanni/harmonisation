@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from dipy.reconst.shm import sph_harm_ind_list, order_from_ncoef
+from dipy.reconst import shm
 
 
 def torch_norm(vect):
@@ -28,8 +28,8 @@ def torch_accuracy(labels, proba):
 
 
 def torch_RIS(X):
-    sh_order = order_from_ncoef(X.shape[-1])
-    m, n = sph_harm_ind_list(sh_order)
+    sh_order = shm.order_from_ncoef(X.shape[-1])
+    m, n = shm.sph_harm_ind_list(sh_order)
     RIS = []
     for i in np.arange(sh_order // 2 + 1) * 2:
         RIS.append(X[..., n == i].sum(-1))
@@ -63,6 +63,47 @@ def torch_mse_gfa(X, Z, weight):
     Z_gfa = torch_gfa(Z)
     mse_gfa = weighted_mse_loss(X_gfa, Z_gfa, weight.squeeze())
     return mse_gfa.mean()
+
+
+def torch_anisotropic_power(sh_coeffs, norm_factor=0.00001, power=2,
+                            non_negative=True):
+    """Calculates anisotropic power map with a given SH coefficient matrix
+    """
+
+    dim = sh_coeffs.shape[:-1]
+    n_coeffs = sh_coeffs.shape[-1]
+    max_order = shm.calculate_max_order(n_coeffs)
+    ap = torch.zeros(dim)
+    n_start = 1
+    for L in range(2, max_order + 2, 2):
+        n_stop = n_start + (2 * L + 1)
+        ap_i = torch.mean(
+            torch.abs(sh_coeffs[..., n_start:n_stop]) ** power, -1)
+        ap += ap_i
+        n_start = n_stop
+
+    # Shift the map to be mostly non-negative,
+    # only applying the log operation to positive elements
+    # to avoid getting numpy warnings on log(0).
+    # It is impossible to get ap values smaller than 0.
+    # Also avoids getting voxels with -inf when non_negative=False.
+
+    if ap.ndim < 1:
+        # For the off chance we have a scalar on our hands
+        ap = torch.reshape(ap, (1, ))
+    log_ap = torch.zeros_like(ap)
+    log_ap[ap > 0] = torch.log(ap[ap > 0]) - torch.log(norm_factor)
+
+    # Deal with residual negative values:
+    if non_negative:
+        if torch.is_tensor(log_ap):
+            # zero all values < 0
+            log_ap[log_ap < 0] = 0
+        else:
+            # assume this is a singleton float (input was 1D):
+            if log_ap < 0:
+                return 0
+    return log_ap
 
 
 def get_metrics_fun():

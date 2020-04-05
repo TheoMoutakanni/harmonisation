@@ -63,10 +63,15 @@ def test_torch_angular_corr_coeff(datas_sh):
     datas_sh = [torch.FloatTensor(data) for data in datas_sh]
 
     acc_11 = metrics.torch_angular_corr_coeff(datas_sh[0], datas_sh[0])
+    acc_11[torch.isnan(acc_11)] = 1
     acc_22 = metrics.torch_angular_corr_coeff(datas_sh[1], datas_sh[1])
+    acc_22[torch.isnan(acc_22)] = 1
     acc_12 = metrics.torch_angular_corr_coeff(datas_sh[0], datas_sh[1])
+    acc_12[torch.isnan(acc_12)] = 1
     acc_21 = metrics.torch_angular_corr_coeff(datas_sh[1], datas_sh[0])
+    acc_21[torch.isnan(acc_21)] = 1
     acc_1n1 = metrics.torch_angular_corr_coeff(datas_sh[0], -datas_sh[0])
+    acc_1n1[torch.isnan(acc_1n1)] = -1
 
     ones = torch.ones(acc_11.shape)
 
@@ -79,13 +84,12 @@ def test_torch_angular_corr_coeff(datas_sh):
     assert torch.isclose(acc_1n1, -ones, rtol=rtol, atol=atol).all()
 
 
-def test_torch_gfa(datas_dwi, datas_sh, gtabs):
+def test_torch_gfa(datas_dwi, gtabs):
     rtol = 1e-04
     atol = 1e-08
 
     idx = 0
     data_dwi = datas_dwi[idx][100:140, 100:140, 28:29]
-    data_sh = datas_sh[idx][100:140, 100:140, 28:29]
     gtab = gtabs[idx]
 
     csamodel = CsaOdfModel(gtab, 4)

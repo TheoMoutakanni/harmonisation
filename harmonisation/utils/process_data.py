@@ -19,7 +19,7 @@ def process_data(path_dict, gtab, signal_parameters):
         autocrop=True,
         **processing_parameters['median_otsu_params'])
 
-    # b0_mask_crop = normalize_data(b0_mask_crop, ~gtab.b0s_mask)
+    b0_mask_crop = normalize_data(b0_mask_crop, ~gtab.b0s_mask)
 
     sh_coeff = dwi_to_sh(b0_mask_crop, gtab, mask=mask,
                          **processing_parameters["sh_params"])
@@ -39,13 +39,16 @@ def process_data(path_dict, gtab, signal_parameters):
     # (x, y, z, sh)
     sh_coeff = torch.FloatTensor(sh_coeff)
     mask = torch.FloatTensor(mask.astype(int)).unsqueeze(-1)
-
-    sh_coeff, number_of_patches = xyz_to_batch(sh_coeff, patch_size)
-    mask, _ = xyz_to_batch(mask, patch_size)
+    real_size = sh_coeff.shape[:3]
+    sh_coeff, number_of_patches = xyz_to_batch(
+        sh_coeff, patch_size, overlap_coeff=signal_parameters['overlap_coeff'])
+    mask, _ = xyz_to_batch(
+        mask, patch_size, overlap_coeff=signal_parameters['overlap_coeff'])
 
     data = {'sh': sh_coeff,
             'mask': mask,
             'number_of_patches': number_of_patches,
+            'real_size': real_size,
             'gtab': gtab}
 
     return data

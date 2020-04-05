@@ -23,6 +23,7 @@ class SHDataset(torch.utils.data.Dataset):
 
         self.names = [p['name'] for p in path_dicts]
         self.transformations = transformations
+        self.signal_parameters = signal_parameters
         self.mean = mean
         self.std = std
         self.patch_size = patch_size

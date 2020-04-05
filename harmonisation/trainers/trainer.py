@@ -65,16 +65,19 @@ class BaseTrainer():
         # Print fODF, RIS and acc for a slice of a validation dwi
         name = validation_dataset.names[0]
         data = validation_dataset.get_data_by_name(name)
+        overlap_coeff = validation_dataset.signal_parameters['overlap_coeff']
 
         sh_true = batch_to_xyz(
-            data['sh'],
-            data['number_of_patches']).cpu()
+            data['sh'].cpu(),
+            data['real_size'])
         sh_pred = batch_to_xyz(
-            self.net.forward(data['sh'].to(self.net.device)),
-            data['number_of_patches']).cpu()
+            self.net.forward(data['sh'].to(self.net.device)).cpu(),
+            data['real_size'],
+            overlap_coeff)
         mask = batch_to_xyz(
-            data['mask'],
-            data['number_of_patches']).cpu()
+            data['mask'].cpu(),
+            data['real_size'],
+            overlap_coeff)
 
         # print_peaks(sh_true)
         # print_peaks(sh_pred)
