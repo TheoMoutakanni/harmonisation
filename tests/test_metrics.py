@@ -7,6 +7,7 @@ from dipy.io.image import load_nifti
 from dipy.io import read_bvals_bvecs
 from dipy.core.gradients import gradient_table
 from dipy.reconst.shm import CsaOdfModel
+import dipy.reconst.dti as dti
 
 from harmonisation.functions import metrics
 from harmonisation.functions import shm
@@ -42,10 +43,11 @@ def gtabs(path_dicts):
 
 
 @pytest.fixture
-def datas_dwi(path_dicts):
+def datas_dwi(path_dicts, gtabs):
     datas = []
-    for patient, path_dict in path_dicts.items():
+    for (patient, path_dict), gtab in zip(path_dicts.items(), gtabs):
         data, affine = load_nifti(path_dict['dwi'])
+        data = shm.normalize_data(data, ~gtab.b0s_mask)
         datas.append(data)
     return datas
 
@@ -95,8 +97,48 @@ def test_torch_gfa(datas_dwi, gtabs):
     csamodel = CsaOdfModel(gtab, 4)
     csamodel = csamodel.fit(data_dwi)
     data_sh = csamodel.shm_coeff
-    csagfa = csamodel.gfa
+    true_gfa = csamodel.gfa
 
-    gfa = metrics.torch_gfa(torch.FloatTensor(data_sh)).numpy()
+    torch_gfa = metrics.torch_gfa(torch.FloatTensor(data_sh)).numpy()
 
-    assert np.isclose(csagfa, gfa, rtol=rtol, atol=atol).all()
+    assert np.isclose(true_gfa, torch_gfa, rtol=rtol, atol=atol).all()
+
+
+def test_torch_evals(datas_dwi, gtabs):
+    rtol = 1e-04
+    atol = 1e-08
+
+    idx = 0
+    data_dwi = datas_dwi[idx][100:140, 100:140, 28:29]
+
+    gtab = gtabs[idx]
+
+    tenmodel = dti.TensorModel(gtab, fit_method='OLS')
+    tenfit = tenmodel.fit(data_dwi)
+    true_evals = tenfit.evals
+
+    torch_evals = metrics.ols_fit_tensor(torch.FloatTensor(data_dwi),
+                                         gtab).numpy()
+    torch_evals = torch_evals[..., :3]
+
+    prop = np.isclose(true_evals, torch_evals,
+                      rtol=rtol, atol=atol).astype(float).mean()
+    assert prop > 0.95
+
+
+def test_torch_fa(datas_dwi, gtabs):
+    rtol = 1e-04
+    atol = 1e-08
+
+    idx = 0
+    data_dwi = datas_dwi[idx][100:140, 100:140, 28:29]
+    gtab = gtabs[idx]
+
+    tenmodel = dti.TensorModel(gtab)
+    tenfit = tenmodel.fit(data_dwi)
+    evals = tenfit.evals
+    true_fa = tenfit.fa
+
+    torch_fa = metrics.torch_fa(torch.FloatTensor(evals)).numpy()
+
+    assert np.isclose(true_fa, torch_fa, rtol=rtol, atol=atol).all()

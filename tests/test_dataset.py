@@ -38,7 +38,7 @@ def cache_directory():
 def signal_params():
     signal_parameters = {
         'patch_size': [12, 12, 12],
-        'overlap_coeff': 2,
+        'overlap_coeff': 1,
         'processing_params': {
             'median_otsu_params': {
                 'median_radius': 3,
@@ -145,29 +145,34 @@ def test_cache_no_cache(path_dicts, signal_params, cache_directory):
 
 
 def test_batch_xyz(ADNI_names, path_dicts, signal_params):
-    dataset = SHDataset(path_dicts,
-                        patch_size=signal_params['patch_size'],
-                        signal_parameters=signal_params,
-                        transformations=None,
-                        cache_dir=None)
+    # Check for multiple overlaps if data == xyz_to_batch(batch_to_xyz(data))
+    for overlap_coeff in range(1, 4):
+        signal_params['overlap_coeff'] = overlap_coeff
 
-    patient = ADNI_names[0]  # np.random.choice(ADNI_names)
-    data_patient = dataset.get_data_by_name(patient)
+        dataset = SHDataset(path_dicts,
+                            patch_size=signal_params['patch_size'],
+                            signal_parameters=signal_params,
+                            transformations=None,
+                            cache_dir=None)
 
-    data_batch = data_patient['sh']
+        patient = np.random.choice(ADNI_names)
+        data_patient = dataset.get_data_by_name(patient)
 
-    data_xyz = batch_to_xyz(data_batch, data_patient['real_size'])
+        data_batch = data_patient['sh']
 
-    assert data_xyz.shape[:3] == data_patient['real_size']
+        data_xyz = batch_to_xyz(data_batch, data_patient['real_size'],
+                                overlap_coeff=signal_params['overlap_coeff'])
 
-    data_batch_2, number_of_patches = xyz_to_batch(
-        data_xyz, signal_params['patch_size'],
-        overlap_coeff=signal_params['overlap_coeff'])
+        assert data_xyz.shape[:3] == data_patient['real_size']
 
-    assert number_of_patches == data_patient['number_of_patches']
-    assert torch.isclose(data_batch,
-                         data_batch_2,
-                         rtol=0.05, atol=1e-6).all()
+        data_batch_2, number_of_patches = xyz_to_batch(
+            data_xyz, signal_params['patch_size'],
+            overlap_coeff=signal_params['overlap_coeff'])
+
+        assert number_of_patches == data_patient['number_of_patches']
+        assert torch.isclose(data_batch,
+                             data_batch_2,
+                             rtol=0.05, atol=1e-6).all()
 
 
 def test_normalization(ADNI_names, path_dicts, signal_params):

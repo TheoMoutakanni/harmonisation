@@ -3,6 +3,7 @@
 .saved_models/
 **/__pycache__/*
 **/**/__pycache__/*
+tests/test_files/.cache
 harmonisation_pkg_*
 
 *.png
