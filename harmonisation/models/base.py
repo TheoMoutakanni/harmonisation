@@ -64,7 +64,7 @@ class BaseNet(nn.Module, object):
     def forward(self, X):
         raise NotImplementedError("Please implement this method")
 
-    def predict_dataset(self, dataset, batch_size=128):
+    def predict_dataset(self, dataset, batch_size=128, names=None):
         """Predicts signals in dictionnary inference_dataset = {name: data}.
         """
         with torch.no_grad():
@@ -72,7 +72,8 @@ class BaseNet(nn.Module, object):
 
             results = dict()
 
-            names = dataset.names
+            if names is None:
+                names = dataset.names
 
             for dmri_name in names:
                 data = dataset.get_data_by_name(dmri_name)
@@ -82,13 +83,13 @@ class BaseNet(nn.Module, object):
                 number_of_batches = int(np.ceil(signal.shape[0] / batch_size))
 
                 for batch in range(number_of_batches):
-                    signal_batch = signal[batch *
-                                          batch_size:(batch + 1) * batch_size]
+                    signal_batch = torch.FloatTensor(
+                        signal[batch * batch_size:(batch + 1) * batch_size])
                     signal_batch = signal_batch.to(self.device)
                     signal_pred = self.forward(signal_batch)
-                    results[dmri_name].append(signal_pred.to('cpu'))
+                    results[dmri_name].append(signal_pred.to('cpu').numpy())
 
-                results[dmri_name] = torch.cat(results[dmri_name])
+                results[dmri_name] = np.concatenate(results[dmri_name])
 
         return results
 

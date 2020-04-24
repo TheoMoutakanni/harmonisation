@@ -11,7 +11,7 @@ from harmonisation.models import ENet
 from harmonisation.settings import SIGNAL_PARAMETERS
 
 # Get the list of all ADNI files, splitted in train/test/validation
-blacklist = []
+blacklist = ['003_S_4288_S142486']
 paths = get_paths_ADNI()
 path_train, path_validation, path_test = train_test_split(
     paths,
@@ -66,12 +66,13 @@ trainer = BaseTrainer(
     metrics=["acc", "mse_gfa", "mse"],
     metric_to_maximize="mse",
     patience=100,
-    save_folder=None,
+    save_folder="./.saved_models/128-8-8-8/",
 )
 
 # Train the network
 trainer.train(train_dataset,
               validation_dataset,
-              num_epochs=101,
+              num_epochs=11,
               batch_size=128,
-              validation=True)
+              validation=True,
+              freq_print=10,)

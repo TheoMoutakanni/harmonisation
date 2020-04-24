@@ -48,6 +48,7 @@ def test_dwi_sh_conversion(data_dwi, gtab):
         data_dwi,
         vol_idx=gtab.b0s_mask,
         autocrop=False)
+    mask_crop = mask_crop[..., None]
 
     data_dwi_norm = shm.normalize_data(data_dwi, gtab.b0s_mask)
 
@@ -55,12 +56,13 @@ def test_dwi_sh_conversion(data_dwi, gtab):
 
     for sh_order in [2, 4, 6, 8, 10]:
 
-        data_sh = shm.dwi_to_sh(data_dwi_norm, gtab,
-                                mask=mask_crop, sh_order=sh_order)
-        data_dwi_revert = shm.sh_to_dwi(data_sh, gtab, mask=mask_crop)
+        data_sh = shm.dwi_to_sh(
+            data_dwi_norm, gtab, mask=mask_crop, sh_order=sh_order)
+        data_dwi_revert = shm.sh_to_dwi(
+            data_sh, gtab, mask=mask_crop, add_b0=False)
 
         data_dwi_true = data_dwi_norm[..., ~gtab.b0s_mask]
-        data_dwi_true *= mask_crop[..., None]
+        data_dwi_true *= mask_crop
 
         assert data_dwi_revert.shape == data_dwi_true.shape
 

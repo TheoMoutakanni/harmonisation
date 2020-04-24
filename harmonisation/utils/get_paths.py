@@ -14,7 +14,8 @@ def get_paths_ADNI(patients=None):
          'dwi': pjoin(ADNI_PATH, 'raw', patient, 'dwi.nii.gz'),
          't1': pjoin(ADNI_PATH, 'raw', patient, 't1.nii.gz'),
          'bval': pjoin(ADNI_PATH, 'raw', patient, 'bval'),
-         'bvec': pjoin(ADNI_PATH, 'raw', patient, 'bvec'), }
+         'bvec': pjoin(ADNI_PATH, 'raw', patient, 'bvec'),
+         'mask': pjoin(ADNI_PATH, 'raw', patient, 'brain_mask.nii.gz')}
         for patient in patients]
 
     return path_dicts

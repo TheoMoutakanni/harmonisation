@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 
-from harmonisation.functions.metrics import compute_metrics_dataset
+from harmonisation.functions import metrics
 from harmonisation.functions.losses import get_loss_fun
 from harmonisation.datasets import AdversarialDataset
 
@@ -68,21 +68,37 @@ class AdversarialTrainer(BaseTrainer):
         self.patience = patience
         self.save_folder = save_folder
 
-    def validate_adv(self, dataset):
+    def validate_adv(self, dataset, batch_size=128):
         """
         Compute metrics on validation_dataset and print some metrics
         """
 
         adv_dataset = AdversarialDataset(dataset, self.net)
 
-        data_true = {name: {'sh': adv_dataset.get_data_by_name(name)['label'],
-                            'mask': None}
+        data_true = {name: adv_dataset.get_data_by_name(name)
                      for name in adv_dataset.names}
         data_pred = self.adv_net.predict_dataset(adv_dataset,
                                                  batch_size=128)
 
-        metrics_batches = compute_metrics_dataset(
-            data_true, data_pred, self.adv_metrics)
+        metrics_fun = metrics.get_metrics_fun()
+
+        metrics_batches = []
+        for name in list(set(data_pred.keys()) & set(data_true.keys())):
+            dic = dict()
+            for metric in self.adv_metrics:
+                metric_calc = []
+                nb_batches = int(np.ceil(len(data_pred[name]) / batch_size))
+                for batch in range(nb_batches):
+                    idx = range(batch * batch_size,
+                                min((batch + 1) * batch_size,
+                                    len(data_pred[name])))
+                    metric_calc.append(metrics_fun[metric](
+                        torch.FloatTensor(data_true[name]['label']),
+                        torch.FloatTensor(data_pred[name][idx])
+                    ))
+                metric_calc = torch.FloatTensor(metric_calc)
+                dic[metric] = metrics.nanmean(metric_calc).numpy()
+            metrics_batches.append(dic)
 
         metrics_epoch = {
             metric: np.nanmean(
@@ -156,10 +172,6 @@ class AdversarialTrainer(BaseTrainer):
             metric: -np.inf
             for metric in self.adv_metrics
         }
-        metrics_train = {
-            metric: -np.inf
-            for metric in self.adv_metrics
-        }
 
         best_value = metrics_final[self.adv_metric_to_maximize]
         best_net = copy.deepcopy(self.adv_net)
@@ -174,7 +186,6 @@ class AdversarialTrainer(BaseTrainer):
                     loss=epoch_loss_train,
                     last_update=last_update,
                     metrics_val=metrics_epoch,
-                    metrics_train=metrics_train
                 )
 
             epoch_loss_train = 0.0
@@ -203,8 +214,8 @@ class AdversarialTrainer(BaseTrainer):
             epoch_loss_train /= (i + 1)
 
             with torch.no_grad():
-                metrics_epoch = self.validate_adv(validation_dataset)
-                metrics_train = self.validate_adv(train_dataset)
+                metrics_epoch = self.validate_adv(validation_dataset,
+                                                  batch_size)
 
             if self.save_folder:
                 self.adv_net.save(self.save_folder + str(epoch) + "_advnet")
@@ -232,7 +243,8 @@ class AdversarialTrainer(BaseTrainer):
                    num_epochs,
                    batch_size=128,
                    validation=True,
-                   metrics_final=None):
+                   metrics_final=None,
+                   freq_print=10):
 
         dataloader_parameters = {
             "num_workers": 1,
@@ -315,14 +327,15 @@ class AdversarialTrainer(BaseTrainer):
             epoch_loss_train /= (i + 1)
 
             with torch.no_grad():
-                metrics_epoch = self.validate(validation_dataset)
-                metrics_epoch_adv = self.validate_adv(validation_dataset)
+                metrics_epoch = self.validate(validation_dataset, batch_size)
+                metrics_epoch_adv = self.validate_adv(validation_dataset,
+                                                      batch_size)
 
                 for metric in metrics_epoch.keys():
                     logger_metrics[metric].append(metrics_epoch[metric])
                 logger_accuracy.append(metrics_epoch_adv["accuracy"])
 
-                if epoch % 100 == 0:  # and epoch != 0:
+                if epoch % freq_print == 0:  # and epoch != 0:
                     self.print_metrics(validation_dataset)
 
             if self.save_folder:

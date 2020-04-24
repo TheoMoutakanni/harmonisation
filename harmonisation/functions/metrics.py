@@ -4,6 +4,14 @@ import torch
 from dipy.reconst import shm, dti
 
 
+def nanmean(v, inplace=False, *args, **kwargs):
+    if not inplace:
+        v = v.clone()
+    is_nan = torch.isnan(v)
+    v[is_nan] = 0
+    return v.sum(*args, **kwargs) / (~is_nan).float().sum(*args, **kwargs)
+
+
 def torch_norm(vect):
     return torch.sqrt(torch.sum(vect**2, axis=-1))
 
@@ -40,7 +48,7 @@ def torch_mse_RIS(X, Z, weight):
     X_RIS = torch_RIS(X)
     Z_RIS = torch_RIS(Z)
     mse_RIS = weighted_mse_loss(X_gra, Z_gfa, weight)
-    return mse_RIS.mean()
+    return mse_RIS
 
 
 def torch_gfa(X):
@@ -62,7 +70,7 @@ def torch_mse_gfa(X, Z, weight):
     X_gfa = torch_gfa(X)
     Z_gfa = torch_gfa(Z)
     mse_gfa = weighted_mse_loss(X_gfa, Z_gfa, weight.squeeze())
-    return mse_gfa.mean()
+    return mse_gfa
 
 
 def torch_anisotropic_power(sh_coeffs, norm_factor=0.00001, power=2,
@@ -136,12 +144,14 @@ def ols_fit_tensor(data, gtab=None, design_matrix=None,
 
     if design_matrix is None:
         design_matrix = dti.design_matrix(gtab)
+        design_matrix = torch.FloatTensor(design_matrix)
 
     if design_matrix_inv is None:
-        design_matrix_inv = np.linalg.pinv(design_matrix)
+        design_matrix_inv = torch.FloatTensor(np.linalg.pinv(design_matrix))
+        design_matrix_inv = design_matrix_inv
 
-    design_matrix = torch.FloatTensor(design_matrix)
-    design_matrix_inv = torch.FloatTensor(design_matrix_inv)
+    design_matrix = design_matrix.to(data.device)
+    design_matrix_inv = design_matrix_inv.to(data.device)
 
     tol = 1e-6
     fit_result = torch.einsum('ij,...j',
@@ -188,10 +198,10 @@ def ols_fit_tensor(data, gtab=None, design_matrix=None,
 def torch_fa(evals):
     all_zero = (evals == 0).all(axis=-1)
     ev1, ev2, ev3 = evals[..., 0], evals[..., 1], evals[..., 2]
-    fa = np.sqrt(0.5 * ((ev1 - ev2) ** 2 +
-                        (ev2 - ev3) ** 2 +
-                        (ev3 - ev1) ** 2) /
-                 ((evals * evals).sum(-1) + all_zero))
+    fa = torch.sqrt(0.5 * ((ev1 - ev2) ** 2 +
+                           (ev2 - ev3) ** 2 +
+                           (ev3 - ev1) ** 2) /
+                    ((evals * evals).sum(-1) + all_zero))
 
     return fa
 
@@ -204,19 +214,5 @@ def get_metrics_fun():
         'mse': lambda x, z, mask: -weighted_mse_loss(x, z, mask),
         'mse_RIS': lambda x, z, mask: -torch_mse_RIS(x, z, mask),
         'mse_gfa': lambda x, z, mask: -torch_mse_gfa(x, z, mask),
-        'accuracy': lambda labels, proba, mask: torch_accuracy(labels, proba)
+        'accuracy': lambda labels, proba: torch_accuracy(labels, proba)
     }
-
-
-def compute_metrics_dataset(data_true, data_pred, metrics):
-    metrics_fun = get_metrics_fun()
-
-    metrics_output = [
-        {metric: np.nanmean(metrics_fun[metric](
-            data_true[name]['sh'],
-            data_pred[name],
-            data_true[name]['mask']))
-            for metric in metrics}
-        for name in list(set(data_pred.keys()) & set(data_true.keys()))]
-
-    return metrics_output

@@ -13,7 +13,7 @@ from harmonisation.settings import SIGNAL_PARAMETERS
 
 def print_peaks(sh_signal, mask=None):
     if has_fury:
-        data_small = sh_signal[:, :, 28:29]
+        data_small = sh_signal[:, :, 50:51]
         ren = window.Renderer()
 
         sh_order = order_from_ncoef(data_small.shape[-1])
@@ -39,17 +39,28 @@ def print_peaks(sh_signal, mask=None):
 
 def print_diff(sh_true, sh_pred, mask, metric_name,
                normalize=False, fig_name=None):
-    metric = get_metrics_fun()[metric_name](sh_true[:, :, 28:29],
-                                            sh_pred[:, :, 28:29],
-                                            mask[:, :, 28:29])
+    metric = get_metrics_fun()[metric_name](sh_true,
+                                            sh_pred,
+                                            mask)
 
     if normalize:
         m = metric[~torch.isnan(metric)].min()
         M = metric[~torch.isnan(metric)].max()
         metric = (metric - m) / (M - m)
 
-    im = plt.imshow(np.squeeze(metric), cmap='hot_r', interpolation='nearest')
-    plt.colorbar(im)
+    fig, axarr = plt.subplots(1, 3)
+    im1 = axarr[0].imshow(np.squeeze(metric[:, :, 50:51]), cmap='hot_r',
+                          interpolation='nearest')
+    fig.colorbar(im1, ax=axarr[0])
+
+    im2 = axarr[1].imshow(np.squeeze(metric[:, 80:81, :]), cmap='hot_r',
+                          interpolation='nearest')
+    fig.colorbar(im2, ax=axarr[1])
+
+    im3 = axarr[2].imshow(np.squeeze(metric[80:81, :, :]), cmap='hot_r',
+                          interpolation='nearest')
+    fig.colorbar(im3, ax=axarr[2])
+
     if fig_name is not None:
         plt.savefig('./{}.png'.format(fig_name))
     plt.suptitle(metric_name)
@@ -57,20 +68,29 @@ def print_diff(sh_true, sh_pred, mask, metric_name,
 
 
 def print_data(sh_true, sh_pred, mask, fig_name=None):
-    mask = mask[:, :, 28:29, 0]
+    mask = mask[:, :, :, 0]
 
-    R_true = np.squeeze(sh_true[..., 28:29] * mask)
-    R_pred = np.squeeze(sh_pred[..., 28:29] * mask)
+    R_true = sh_true * mask
+    R_pred = sh_pred * mask
     M = R_true.max()
     m = R_true.min()
 
-    print(R_true.shape)
+    fig, axarr = plt.subplots(2, 3)
+    axarr[0][0].imshow(np.squeeze(R_true[:, :, 50:51]), vmin=m, vmax=M)
+    axarr[0][0].set_title('True value')
+    axarr[1][0].imshow(np.squeeze(R_pred[:, :, 50:51]), vmin=m, vmax=M)
+    axarr[1][0].set_title('Predicted value')
 
-    fig, axarr = plt.subplots(2, 1)
-    axarr[0].imshow(R_true, vmin=m, vmax=M)
-    axarr[0].set_title('True value')
-    axarr[1].imshow(R_pred, vmin=m, vmax=M)
-    axarr[1].set_title('Predicted value')
+    axarr[0][1].imshow(np.squeeze(R_true[:, 80:81, :]), vmin=m, vmax=M)
+    axarr[0][1].set_title('True value')
+    axarr[1][1].imshow(np.squeeze(R_pred[:, 80:81, :]), vmin=m, vmax=M)
+    axarr[1][1].set_title('Predicted value')
+
+    axarr[0][2].imshow(np.squeeze(R_true[80:81, :, :]), vmin=m, vmax=M)
+    axarr[0][2].set_title('True value')
+    axarr[1][2].imshow(np.squeeze(R_pred[80:81, :, :]), vmin=m, vmax=M)
+    axarr[1][2].set_title('Predicted value')
+
     if fig_name is not None:
         plt.suptitle(fig_name)
         plt.savefig('./{}.png'.format(fig_name))
@@ -79,12 +99,12 @@ def print_data(sh_true, sh_pred, mask, fig_name=None):
 
 def print_RIS(RIS_true, RIS_pred, mask, fig_name=None):
 
-    mask = mask[:, :, 28:29, 0]
+    mask = mask[:, :, 50:51, 0]
     colors_true = []
     colors_pred = []
     for order in range(3):
-        R_true = RIS_true[..., 28:29, order]
-        R_pred = RIS_pred[..., 28:29, order]
+        R_true = RIS_true[..., 50:51, order]
+        R_pred = RIS_pred[..., 50:51, order]
         R_max = R_true[mask.bool()].max()
         R_min = R_true[mask.bool()].min()
         R_true = (R_true - R_min) / (R_max - R_min) * mask

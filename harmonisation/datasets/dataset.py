@@ -1,4 +1,5 @@
 from harmonisation.utils.process_data import process_data
+from harmonisation.datasets.utils import xyz_to_batch
 
 from dipy.io import read_bvals_bvecs
 from dipy.core.gradients import gradient_table
@@ -7,6 +8,7 @@ from joblib import Memory, Parallel, delayed
 import tqdm
 
 import torch
+import numpy as np
 
 
 class SHDataset(torch.utils.data.Dataset):
@@ -47,12 +49,24 @@ class SHDataset(torch.utils.data.Dataset):
             ) for path_dict, gtab in tqdm.tqdm(zip(path_dicts, gtabs),
                                                total=len(path_dicts)))
 
+        if normalize_data:
+            self.normalize_data()
+
+        for d in self.data:
+            d['sh'], _ = xyz_to_batch(
+                d['sh'],
+                patch_size,
+                overlap_coeff=signal_parameters['overlap_coeff'])
+            d['mask'], _ = xyz_to_batch(
+                d['mask'],
+                patch_size,
+                overlap_coeff=signal_parameters['overlap_coeff'])
+
         self.name_to_idx = {name: idx for idx, name in enumerate(self.names)}
         self.dataset_indexes = [(i, j) for i, d in enumerate(self.data)
                                 for j in range(d['sh'].shape[0])]
 
-        if normalize_data:
-            self.normalize_data()
+        print(len(self.dataset_indexes))
 
     def __len__(self):
         return len(self.dataset_indexes)
@@ -61,6 +75,9 @@ class SHDataset(torch.utils.data.Dataset):
         patient_idx, patch_idx = self.dataset_indexes[idx]
         signal = self.data[patient_idx]['sh'][patch_idx]
         mask = self.data[patient_idx]['mask'][patch_idx]
+
+        signal = torch.FloatTensor(signal)
+        mask = torch.LongTensor(mask)
 
         if self.transformations is not None:
             signal = self.transformations(signal)
@@ -77,11 +94,11 @@ class SHDataset(torch.utils.data.Dataset):
 
     def normalize_data(self):
         if self.mean is None or self.std is None:
-            self.mean = torch.mean(torch.stack(
-                [d['sh'].flatten(end_dim=-2).mean(0)
+            self.mean = np.mean(np.stack(
+                [d['sh'].reshape(-1, d['sh'].shape[-1]).mean(0)
                  for d in self.data]), 0)
-            self.std = torch.mean(torch.stack(
-                [d['sh'].flatten(end_dim=-2).std(0)
+            self.std = np.mean(np.stack(
+                [d['sh'].reshape(-1, d['sh'].shape[-1]).std(0)
                  for d in self.data]), 0)
 
         for d in self.data:

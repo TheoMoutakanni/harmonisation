@@ -4,6 +4,7 @@ from dipy.reconst.shm import real_sym_sh_basis, order_from_ncoef
 from scilpy.reconst.raw_signal import compute_sh_coefficients
 
 import numpy as np
+import torch
 
 
 def normalize_data(data, where_b0, min_signal=1e-5, out=None):
@@ -34,12 +35,17 @@ def dwi_to_sh(data_dwi, gtab,
 
     mini = .001
     maxi = .999
-    data_dwi = data_dwi[..., ~gtab.b0s_mask].clip(mini, maxi)
-    data_sh = np.dot(data_dwi, invB.T)
+
+    if torch.is_tensor(data_dwi):
+        invB = torch.FloatTensor(invB)
+        data_dwi = data_dwi[..., ~gtab.b0s_mask].clamp(mini, maxi)
+        data_sh = torch.einsum("...i,ij", data_dwi, invB.T)
+    else:
+        data_dwi = data_dwi[..., ~gtab.b0s_mask].clip(mini, maxi)
+        data_sh = np.einsum("...i,ij", data_dwi, invB.T)
 
     if mask is not None:
-        mask = np.asarray(mask, dtype=bool)
-        data_sh *= mask[..., None]
+        data_sh *= mask
 
     # data_sh = compute_sh_coefficients(data_dwi, gtab,
     #                                   mask=mask,
@@ -49,7 +55,7 @@ def dwi_to_sh(data_dwi, gtab,
     return data_sh
 
 
-def sh_to_dwi(data_sh, gtab, mask=None):
+def sh_to_dwi(data_sh, gtab, mask=None, add_b0=True):
     sh_order = order_from_ncoef(data_sh.shape[-1])
     x, y, z = gtab.gradients[~gtab.b0s_mask].T
     r, theta, phi = cart2sphere(x, y, z)
@@ -57,10 +63,24 @@ def sh_to_dwi(data_sh, gtab, mask=None):
 
     mini = .001
     maxi = .999
-    data_dwi = np.dot(data_sh, B.T).clip(mini, maxi)
+
+    if torch.is_tensor(data_sh):
+        B = torch.FloatTensor(B).to(data_sh.device)
+        data_dwi = torch.einsum("...i,ij", data_sh, B.T).clamp(mini, maxi)
+
+        if add_b0:
+            b0_like = torch.ones(*data_dwi.shape[:-1], gtab.b0s_mask.sum())
+            b0_like = b0_like.to(data_dwi.device)
+            data_dwi = torch.cat([b0_like, data_dwi], dim=-1)
+    else:
+        data_dwi = np.einsum("...i,ij", data_sh, B.T).clip(mini, maxi)
+
+        if add_b0:
+            shape = tuple(data_dwi.shape[:-1]) + (gtab.b0s_mask.sum(),)
+            b0_like = np.ones(shape)
+            data_dwi = np.concatenate([b0_like, data_dwi], axis=-1)
 
     if mask is not None:
-        mask = np.asarray(mask, dtype=bool).squeeze()
-        data_dwi *= mask[..., None]
+        data_dwi *= mask
 
     return data_dwi

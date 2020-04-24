@@ -23,7 +23,8 @@ def path_dicts(ADNI_names):
                   'dwi': pjoin(path, 'raw', patient, 'dwi.nii.gz'),
                   't1': pjoin(path, 'raw', patient, 't1.nii.gz'),
                   'bval': pjoin(path, 'raw', patient, 'bval'),
-                  'bvec': pjoin(path, 'raw', patient, 'bvec'), }
+                  'bvec': pjoin(path, 'raw', patient, 'bvec'),
+                  'mask': pjoin(path, 'raw', patient, 'brain_mask.nii.gz')}
                  for patient in ADNI_names]
 
     return path_dict
@@ -158,7 +159,7 @@ def test_batch_xyz(ADNI_names, path_dicts, signal_params):
         patient = np.random.choice(ADNI_names)
         data_patient = dataset.get_data_by_name(patient)
 
-        data_batch = data_patient['sh']
+        data_batch = torch.FloatTensor(data_patient['sh'])
 
         data_xyz = batch_to_xyz(data_batch, data_patient['real_size'],
                                 overlap_coeff=signal_params['overlap_coeff'])
@@ -169,7 +170,6 @@ def test_batch_xyz(ADNI_names, path_dicts, signal_params):
             data_xyz, signal_params['patch_size'],
             overlap_coeff=signal_params['overlap_coeff'])
 
-        assert number_of_patches == data_patient['number_of_patches']
         assert torch.isclose(data_batch,
                              data_batch_2,
                              rtol=0.05, atol=1e-6).all()
@@ -189,6 +189,6 @@ def test_normalization(ADNI_names, path_dicts, signal_params):
     mean, std = dataset.mean, dataset.std
     data_normalized = dataset.get_data_by_name(patient)['sh']
 
-    assert torch.isclose(data_normalized * std + mean,
-                         data_raw,
-                         rtol=0.05, atol=1e-6).all()
+    assert np.isclose(data_normalized * std + mean,
+                      data_raw,
+                      rtol=0.05, atol=1e-6).all()

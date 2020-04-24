@@ -19,7 +19,7 @@ class AdversarialNet(BaseNet):
     def __init__(self,
                  patch_size,
                  sh_order,
-                 embed=128,
+                 embed=[16, 32, 64],
                  encoder_relu=False):
         super().__init__()
 
@@ -27,60 +27,60 @@ class AdversarialNet(BaseNet):
         self.patch_size = patch_size
 
         self.initial_block = InitialBlock(self.ncoef,
-                                          32, relu=encoder_relu)
+                                          embed[0], relu=encoder_relu)
 
         # Stage 1 - Encoder
         self.downsample1_0 = DownsamplingBottleneck(
-            32,
-            64,
+            embed[0],
+            embed[1],
             return_indices=True,
             dropout_prob=0.01,
             relu=encoder_relu)
         self.regular1_1 = RegularBottleneck(
-            64, padding=1, dropout_prob=0.01, relu=encoder_relu)
+            embed[1], padding=1, dropout_prob=0.01, relu=encoder_relu)
         self.regular1_2 = RegularBottleneck(
-            64, padding=1, dropout_prob=0.01, relu=encoder_relu)
+            embed[1], padding=1, dropout_prob=0.01, relu=encoder_relu)
         self.regular1_3 = RegularBottleneck(
-            64, padding=1, dropout_prob=0.01, relu=encoder_relu)
+            embed[1], padding=1, dropout_prob=0.01, relu=encoder_relu)
         self.regular1_4 = RegularBottleneck(
-            64, padding=1, dropout_prob=0.01, relu=encoder_relu)
+            embed[1], padding=1, dropout_prob=0.01, relu=encoder_relu)
 
         # Stage 2 - Encoder
         self.downsample2_0 = DownsamplingBottleneck(
-            64,
-            embed,
+            embed[1],
+            embed[2],
             return_indices=True,
             dropout_prob=0.1,
             relu=encoder_relu)
         self.regular2_1 = RegularBottleneck(
-            embed, padding=1, dropout_prob=0.1, relu=encoder_relu)
+            embed[2], padding=1, dropout_prob=0.1, relu=encoder_relu)
         self.dilated2_2 = RegularBottleneck(
-            embed, dilation=2, padding=2, dropout_prob=0.1, relu=encoder_relu)
+            embed[2], dilation=2, padding=2, dropout_prob=0.1, relu=encoder_relu)
         self.asymmetric2_3 = RegularBottleneck(
-            embed,
+            embed[2],
             kernel_size=5,
             padding=2,
             asymmetric=True,
             dropout_prob=0.1,
             relu=encoder_relu)
         self.dilated2_4 = RegularBottleneck(
-            embed, dilation=4, padding=4, dropout_prob=0.1, relu=encoder_relu)
+            embed[2], dilation=4, padding=4, dropout_prob=0.1, relu=encoder_relu)
         self.regular2_5 = RegularBottleneck(
-            embed, padding=1, dropout_prob=0.1, relu=encoder_relu)
+            embed[2], padding=1, dropout_prob=0.1, relu=encoder_relu)
         self.dilated2_6 = RegularBottleneck(
-            embed, dilation=8, padding=8, dropout_prob=0.1, relu=encoder_relu)
+            embed[2], dilation=8, padding=8, dropout_prob=0.1, relu=encoder_relu)
         self.asymmetric2_7 = RegularBottleneck(
-            embed,
+            embed[2],
             kernel_size=5,
             asymmetric=True,
             padding=2,
             dropout_prob=0.1,
             relu=encoder_relu)
         self.dilated2_8 = RegularBottleneck(
-            embed, dilation=16, padding=16, dropout_prob=0.1, relu=encoder_relu)
+            embed[2], dilation=16, padding=16, dropout_prob=0.1, relu=encoder_relu)
 
         self.adaptive_avgpool3_1 = nn.AdaptiveAvgPool3d((1, 1, 1))
-        self.dense3_2 = nn.Linear(in_features=embed, out_features=1, bias=True)
+        self.dense3_2 = nn.Linear(in_features=embed[2], out_features=1, bias=True)
         self.sigmoid3_3 = nn.Sigmoid()
 
     def forward(self, x):

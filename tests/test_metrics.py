@@ -54,7 +54,7 @@ def datas_dwi(path_dicts, gtabs):
 
 @pytest.fixture
 def datas_sh(datas_dwi, gtabs):
-    return [shm.dwi_to_sh(data, gtab, sh_order=4)
+    return [shm.dwi_to_sh(torch.FloatTensor(data), gtab, sh_order=4)
             for data, gtab in zip(datas_dwi, gtabs)]
 
 
@@ -142,3 +142,21 @@ def test_torch_fa(datas_dwi, gtabs):
     torch_fa = metrics.torch_fa(torch.FloatTensor(evals)).numpy()
 
     assert np.isclose(true_fa, torch_fa, rtol=rtol, atol=atol).all()
+
+
+def test_backward_fa(datas_sh, gtabs):
+    idx = 0
+    data_sh = datas_sh[idx][100:140, 100:140, 28:29]
+    gtab = gtabs[idx]
+
+    data_sh = torch.FloatTensor(data_sh).cuda()
+    data_sh.requires_grad = True
+
+    data_dwi = shm.sh_to_dwi(data_sh, gtab)
+
+    evals = metrics.ols_fit_tensor(data_dwi, gtab)[..., :3]
+    torch_fa = metrics.torch_fa(evals)
+
+    torch_fa.mean().backward()
+
+    assert not torch.isnan(data_sh.grad).any()

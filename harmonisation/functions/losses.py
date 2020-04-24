@@ -4,14 +4,6 @@ import torch.nn as nn
 from .metrics import *
 
 
-def nanmean(v, inplace=False, *args, **kwargs):
-    if not inplace:
-        v = v.clone()
-    is_nan = torch.isnan(v)
-    v[is_nan] = 0
-    return v.sum(*args, **kwargs) / (~is_nan).float().sum(*args, **kwargs)
-
-
 def weighted_mse_loss(X, Z, weight):
     """Overcomplicated to remove nans with div by 0 ... """
     batch = X.shape[0]
