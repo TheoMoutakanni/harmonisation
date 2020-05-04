@@ -27,6 +27,7 @@ def normalize_data(data, where_b0, min_signal=1e-5, out=None):
 def dwi_to_sh(data_dwi, gtab,
               sh_order=4, mask=None, use_attenuation=True, smooth=0.006,
               * args, **kwargs):
+
     x, y, z = gtab.gradients[~gtab.b0s_mask].T
     r, theta, phi = cart2sphere(x, y, z)
     B, m, n = real_sym_sh_basis(sh_order, theta[:, None], phi[:, None])
@@ -46,11 +47,6 @@ def dwi_to_sh(data_dwi, gtab,
 
     if mask is not None:
         data_sh *= mask
-
-    # data_sh = compute_sh_coefficients(data_dwi, gtab,
-    #                                   mask=mask,
-    #                                   use_attenuation=use_attenuation,
-    #                                   * args, **kwargs)
 
     return data_sh
 

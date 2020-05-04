@@ -41,13 +41,21 @@ def xyz_to_batch(signal, patch_size, overlap_coeff=1):
     return signal_as_batch, number_of_patches
 
 
-def batch_to_xyz(dmri_batch, real_size, overlap_coeff=1):
+def batch_to_xyz(dmri_batch, real_size, empty=None, overlap_coeff=1,
+                 regularization_sigma=None):
     """Convert the signal of shape (batch, patch_x, patch_y, patch_z, sh)
     to a signal in contiguous coordinates (x, y, z, sh)
     Return the signal in contiguous coordinates
 
+    Empty is an array of boolean to filter empty patches who where removed
+
     If overlap_coeff > 1, then each value will be the mean of all predicted
     values at the same xyz coordinate
+
+    If regularization_sigma is not None, each value in a patch will be
+    weighted by a 3D unnormalized gaussian kernel
+    So if overlap_coef > 1, the voxels wich are on the borders of some patches
+    will have less impact on the mean.
     """
 
     batch_size, patch_x, patch_y, patch_z, sh_coeff = dmri_batch.shape
@@ -59,43 +67,97 @@ def batch_to_xyz(dmri_batch, real_size, overlap_coeff=1):
     if torch.is_tensor(dmri_batch):
         idx = torch.LongTensor(idx)
 
-    idx, number_of_patches = xyz_to_batch(idx,
-                                          [patch_x, patch_y, patch_z],
-                                          overlap_coeff)
+    idx, _ = xyz_to_batch(idx,
+                          [patch_x, patch_y, patch_z],
+                          overlap_coeff)
 
-    number_of_voxels = np.prod(number_of_patches) * patch_x * patch_y * patch_z
+    if empty is not None:
+        idx = idx[~empty]
+
+    number_of_voxels = np.prod(idx.shape[:-1])
 
     if torch.is_tensor(dmri_batch):
         dmri_flat = torch.zeros((np.prod(real_size), sh_coeff),
                                 dtype=dmri_batch.dtype)
 
+        # Get the weigths
+        if regularization_sigma is not None:
+            weigths = torch.FloatTensor(gaussian_kernel(patch_x, 10, 3))
+            weigths = weigths.repeat(batch_size, 1, 1)
+            weigths = weigths.reshape(number_of_voxels, 1)
+        else:
+            weigths = torch.ones((number_of_voxels, 1))
+
         # Sum all values of dmri_batch at each xyz coordinates according to idx
+        dmri_batch = dmri_batch.reshape(number_of_voxels, sh_coeff)
+
         dmri_flat.index_add_(0,
                              idx.reshape(number_of_voxels),
-                             dmri_batch.reshape(number_of_voxels, sh_coeff))
+                             dmri_batch * weigths)
 
         # Get the number of predicted value per xyz coordinate
         NB = torch.zeros(np.prod(real_size), 1)
         NB.index_add_(0,
                       idx.reshape(number_of_voxels),
-                      torch.ones((number_of_voxels, 1)))
+                      weigths)
+        NB[NB == 0] = 1
 
     else:
         dmri_flat = np.zeros((np.prod(real_size), sh_coeff),
                              dtype=dmri_batch.dtype)
 
+        # Get the weigths
+        if regularization_sigma is not None:
+            weigths = gaussian_kernel(patch_x, 10, 3)
+            weigths = np.repeat(weigths[None, ...], batch_size, 0)
+            weigths = weigths.reshape(number_of_voxels, 1)
+        else:
+            weigths = np.ones((number_of_voxels, 1))
+
         # Sum all values of dmri_batch at each xyz coordinates according to idx
+        dmri_batch = dmri_batch.reshape(number_of_voxels, sh_coeff)
+
         np.add.at(dmri_flat,
                   idx.reshape(number_of_voxels),
-                  dmri_batch.reshape(number_of_voxels, sh_coeff))
+                  dmri_batch * weigths)
 
         # Get the number of predicted value per xyz coordinate
         NB = np.zeros((np.prod(real_size), 1))
         np.add.at(NB,
                   idx.reshape(number_of_voxels),
-                  torch.ones((number_of_voxels, 1)))
+                  weigths)
+        NB[NB == 0] = 1
 
     # Compute mean and reshape
     dmri_xyz = (dmri_flat / NB).reshape(*real_size, sh_coeff)
 
     return dmri_xyz
+
+
+def gaussian_kernel(size, sigma, ndim=3):
+    """Return N-Dimensional Gaussian Kernel
+    - size  size of kernel, if the size if even, the kernel is mirrored
+    along all axes
+    ex: for size = 4, sigma = 1, ndim = 2
+        [[0.36787944, 0.60653066, 0.60653066, 0.36787944],
+         [0.60653066, 1.        , 1.        , 0.60653066],
+         [0.60653066, 1.        , 1.        , 0.60653066],
+         [0.36787944, 0.60653066, 0.60653066, 0.36787944]]
+    - sigma standard deviation of gaussian
+    - ndim number of dimension of the kernel
+    """
+    s = int(size / 2)
+    grid = np.meshgrid(*[np.arange(-s + (1 - s % 2), s + 1)] * ndim)
+    k = np.exp(-np.power(grid, 2).sum(0) / (2 * (sigma ** 2)))
+    if size % 2 == 0:
+        # If the size is even, the kernel is mirrored
+        for dim in range(ndim):
+            # Corresponds to [..., s:, ...] on dimension dim
+            slc = (slice(None),) * dim + (slice(s, None),) + \
+                (slice(None),) * (ndim - 1 - dim)
+            # Corresponds to [..., ::-1, ...] on dimension dim
+            flip = (slice(None),) * dim + (slice(None, None, -1),) + \
+                (slice(None),) * (ndim - 1 - dim)
+            # Corresponds to k[s:] = k[::-1][s:] on dimension dim
+            k[slc] = k[flip][slc]
+    return k  # / k.sum()

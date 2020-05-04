@@ -75,3 +75,5 @@ def get_loss_fun(loss_specs):
         return loss_mse_gfa(**loss_specs["parameters"])
     elif loss_specs["type"] == "mse_RIS":
         return loss_mse_RIS(**loss_specs["parameters"])
+    elif loss_specs["type"] == "cross_entropy":
+        return nn.CrossEntropyLoss(**loss_specs["parameters"])

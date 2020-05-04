@@ -9,6 +9,8 @@ class AdversarialDataset(torch.utils.data.Dataset):
                                         batch_size=128)
 
         self.data = list(data_true.values()) + list(data_pred.values())
+        self.sites = [dataset.get_data_by_name(name)['site']
+                      for name in dataset.names] * 2
         self.labels = torch.FloatTensor(
             [1] * len(data_true) + [0] * len(data_pred)).unsqueeze(1)
         self.names = [name + "_true" for name in data_true.keys()] + \
@@ -34,4 +36,5 @@ class AdversarialDataset(torch.utils.data.Dataset):
         """
         patient_idx = self.name_to_idx[dmri_name]
         return {'sh': self.data[patient_idx],
-                'label': self.labels[patient_idx]}
+                'label': self.labels[patient_idx],
+                'site': self.sites[patient_idx]}

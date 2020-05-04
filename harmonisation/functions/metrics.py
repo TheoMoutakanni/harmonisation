@@ -30,8 +30,10 @@ def weighted_mse_loss(X, Z, weight):
 
 
 def torch_accuracy(labels, proba):
-    predicted = (proba > 0.5).float()
+    predicted = torch.argmax(proba, dim=1)
     accuracy = (predicted == labels).float().mean()
+    print(predicted)
+    print(labels)
     return accuracy
 
 

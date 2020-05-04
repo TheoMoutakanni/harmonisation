@@ -86,18 +86,11 @@ class AdversarialTrainer(BaseTrainer):
         for name in list(set(data_pred.keys()) & set(data_true.keys())):
             dic = dict()
             for metric in self.adv_metrics:
-                metric_calc = []
-                nb_batches = int(np.ceil(len(data_pred[name]) / batch_size))
-                for batch in range(nb_batches):
-                    idx = range(batch * batch_size,
-                                min((batch + 1) * batch_size,
-                                    len(data_pred[name])))
-                    metric_calc.append(metrics_fun[metric](
-                        torch.FloatTensor(data_true[name]['label']),
-                        torch.FloatTensor(data_pred[name][idx])
-                    ))
-                metric_calc = torch.FloatTensor(metric_calc)
-                dic[metric] = metrics.nanmean(metric_calc).numpy()
+                dic[metric] = np.nanmean(metrics_fun[metric](
+                    torch.FloatTensor([data_true[name]['site']]),
+                    torch.FloatTensor(data_pred[name])
+                ))
+
             metrics_batches.append(dic)
 
         metrics_epoch = {
@@ -108,52 +101,61 @@ class AdversarialTrainer(BaseTrainer):
 
         return metrics_epoch
 
-    def get_batch_adv_loss(self, X):
+    def get_batch_adv_loss(self, X, y, Z=None, coeff_fake=0.5):
         """ Get the loss for the adversarial network
         Single forward and backward pass """
         X = X.to(self.net.device)
-        Z = self.net(X)
-        real_labels = torch.ones(Z.shape[0]).unsqueeze(1).to(self.net.device)
-        fake_labels = torch.zeros(Z.shape[0]).unsqueeze(1).to(self.net.device)
+        y = y.to(self.net.device)
 
-        real_proba = self.adv_net.forward(X)
-        fake_proba = self.adv_net.forward(Z.detach())
+        real_y = self.adv_net.forward(X)
+        batch_loss_real = self.adv_loss(real_y, y.squeeze())
 
-        batch_loss_real = self.adv_loss(real_proba, real_labels)
-        batch_loss_fake = self.adv_loss(fake_proba, fake_labels)
+        print(list(zip(y.squeeze().cpu().numpy(), torch.argmax(real_y, dim=1).detach().cpu().numpy())))
 
-        batch_loss = batch_loss_real + batch_loss_fake
+        batch_loss = (1 - coeff_fake) * batch_loss_real
+
+        if coeff_fake > 0:
+            if Z is None:
+                Z = self.net(X)
+            fake_y = self.adv_net.forward(Z.detach())
+            batch_loss_fake = self.adv_loss(fake_y, y.squeeze())
+
+            batch_loss += coeff_fake * batch_loss_fake
 
         return Z, batch_loss
 
-    def get_batch_loss(self, X, mask, Z=None):
+    def get_batch_loss(self, X, mask, y, returnZ=False):
         """ Get the loss + adversarial loss for the autoencoder
         Single forward and backward pass """
         X = X.to(self.net.device)
+        y = y.to(self.net.device)
         mask = mask.to(self.net.device)
 
-        if Z is None:
-            # If Z is not already given
-            Z = self.net(X)
+        Z = self.net(X)
 
         batch_loss_reconst = self.loss(X, Z, mask)
-        labels = torch.zeros(Z.shape[0]).unsqueeze(1).to(self.adv_net.device)
 
-        self.adv_net.eval()
-        proba = self.adv_net.forward(Z)
-        batch_loss_adv = self.adv_loss(proba, labels)
+        pred_y = self.adv_net.forward(Z)
+        batch_loss_adv = -self.adv_loss(pred_y, y.squeeze())
 
-        batch_loss = 0.1 * batch_loss_reconst + batch_loss_adv
+        batch_loss = batch_loss_reconst + batch_loss_adv
 
-        return batch_loss
+        if returnZ:
+            return Z, batch_loss
+        else:
+            return batch_loss
 
     def train_adv_net(self,
                       train_dataset,
                       validation_dataset,
                       num_epochs,
+                      coeff_fake=0.5,
                       batch_size=128,
                       validation=True,
                       metrics_final=None):
+
+        train_dataset.set_return_site(True)
+        validation_dataset.set_return_site(True)
 
         dataloader_parameters = {
             "num_workers": 1,
@@ -190,26 +192,26 @@ class AdversarialTrainer(BaseTrainer):
 
             epoch_loss_train = 0.0
 
-            with torch.autograd.detect_anomaly():
-                for i, data in enumerate(dataloader_train, 0):
+            for i, data in enumerate(dataloader_train, 0):
 
-                    self.adv_optimizer.zero_grad()
+                self.adv_optimizer.zero_grad()
 
-                    # Set network to train mode
-                    self.adv_net.train()
+                # Set network to train mode
+                self.adv_net.train()
 
-                    X, mask = data
-                    _, batch_loss = self.get_batch_adv_loss(X)
+                X, mask, y = data
+                _, batch_loss = self.get_batch_adv_loss(
+                    X, y, coeff_fake=coeff_fake)
 
-                    epoch_loss_train += batch_loss.item()
+                epoch_loss_train += batch_loss.item()
 
-                    loss = batch_loss
-                    loss.backward()
+                loss = batch_loss
+                loss.backward()
 
-                    # self.net.plot_grad_flow()
+                # self.net.plot_grad_flow()
 
-                    # gradient descent
-                    self.adv_optimizer.step()
+                # gradient descent
+                self.adv_optimizer.step()
 
             epoch_loss_train /= (i + 1)
 
@@ -241,10 +243,14 @@ class AdversarialTrainer(BaseTrainer):
                    train_dataset,
                    validation_dataset,
                    num_epochs,
+                   coeff_fake=0.5,
                    batch_size=128,
                    validation=True,
                    metrics_final=None,
                    freq_print=10):
+
+        train_dataset.set_return_site(True)
+        validation_dataset.set_return_site(True)
 
         dataloader_parameters = {
             "num_workers": 1,
@@ -291,37 +297,34 @@ class AdversarialTrainer(BaseTrainer):
             epoch_loss_train_adv = 0.0
             epoch_loss_train = 0.0
 
-            with torch.autograd.detect_anomaly():
-                for i, data in enumerate(dataloader_train, 0):
-                    # TRain adversarial network
+            for i, data in enumerate(dataloader_train, 0):
+                # TRain adversarial network
 
-                    self.adv_optimizer.zero_grad()
+                # Train autoencoder
 
-                    self.adv_net.train()
+                self.optimizer.zero_grad()
 
-                    X, mask = data
-                    Z, batch_loss_classif = self.get_batch_adv_loss(X)
+                self.net.train()
+                self.adv_net.train()
 
-                    epoch_loss_train_adv += batch_loss_classif.item()
+                X, mask, y = data
+                Z, loss_autoencoder = self.get_batch_loss(X, mask, y,
+                                                          returnZ=True)
 
-                    batch_loss_classif.backward()
-                    self.adv_optimizer.step()
+                epoch_loss_train += loss_autoencoder.item()
 
-                    # Train autoencoder
+                loss_autoencoder.backward()
+                self.optimizer.step()
 
-                    self.optimizer.zero_grad()
+                self.adv_optimizer.zero_grad()
 
-                    self.net.train()
+                Z, batch_loss_classif = self.get_batch_adv_loss(
+                    X, y, Z=Z, coeff_fake=coeff_fake)
 
-                    batch_loss_autoencoder = self.get_batch_loss(
-                        X, mask, Z=Z)
+                epoch_loss_train_adv += batch_loss_classif.item()
 
-                    epoch_loss_train += batch_loss_autoencoder.item()
-
-                    batch_loss_autoencoder.backward()
-                    self.optimizer.step()
-
-                    # self.net.plot_grad_flow()
+                batch_loss_classif.backward()
+                self.adv_optimizer.step()
 
             epoch_loss_train_adv /= (i + 1)
             epoch_loss_train /= (i + 1)
@@ -335,7 +338,7 @@ class AdversarialTrainer(BaseTrainer):
                     logger_metrics[metric].append(metrics_epoch[metric])
                 logger_accuracy.append(metrics_epoch_adv["accuracy"])
 
-                if epoch % freq_print == 0:  # and epoch != 0:
+                if epoch % freq_print == 0 and epoch != 0:
                     self.print_metrics(validation_dataset)
 
             if self.save_folder:

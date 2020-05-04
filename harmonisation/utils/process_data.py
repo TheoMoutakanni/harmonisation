@@ -22,12 +22,13 @@ def process_data(path_dict, gtab, signal_parameters):
             autocrop=True,
             **processing_parameters['median_otsu_params'])
 
-    data = normalize_data(data, ~gtab.b0s_mask)
+    data = normalize_data(data, gtab.b0s_mask)
 
     mask = np.expand_dims(mask.astype(int), axis=-1)
 
     sh_coeff = dwi_to_sh(data, gtab, mask=mask,
-                         **processing_parameters["sh_params"])
+                         sh_order=signal_parameters['sh_order'],
+                         ** processing_parameters["sh_params"])
 
     # Pad the x,y,z axes so they can be divided by the respective patch size
     patch_size = np.array(signal_parameters["patch_size"])
@@ -45,5 +46,8 @@ def process_data(path_dict, gtab, signal_parameters):
             'mask': mask,
             'real_size': real_size,
             'gtab': gtab}
+
+    if 'site' in path_dict.keys():
+        data['site'] = path_dict['site']
 
     return data

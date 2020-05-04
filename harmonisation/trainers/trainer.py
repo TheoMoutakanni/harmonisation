@@ -92,15 +92,18 @@ class BaseTrainer():
         sh_pred = batch_to_xyz(
             sh_pred,
             data['real_size'],
-            overlap_coeff)
+            empty=data['empty'],
+            overlap_coeff=overlap_coeff)
         sh_true = batch_to_xyz(
             sh_true,
             data['real_size'],
-            overlap_coeff)
+            empty=data['empty'],
+            overlap_coeff=overlap_coeff)
         mask = batch_to_xyz(
             data_mask,
             data['real_size'],
-            overlap_coeff)
+            empty=data['empty'],
+            overlap_coeff=overlap_coeff)
 
         sh_pred = torch.FloatTensor(sh_pred)
         sh_true = torch.FloatTensor(sh_true)
@@ -119,13 +122,13 @@ class BaseTrainer():
                    metrics.torch_gfa(sh_pred),
                    mask)
 
-        dwi_true = shm.sh_to_dwi(sh_true, data['gtab'])
-        dwi_pred = shm.sh_to_dwi(sh_pred, data['gtab'])
-        evals_true = metrics.ols_fit_tensor(dwi_true, data['gtab'])
-        evals_pred = metrics.ols_fit_tensor(dwi_pred, data['gtab'])
-        print_data(metrics.torch_fa(evals_true),
-                   metrics.torch_fa(evals_pred),
-                   mask)
+        # dwi_true = shm.sh_to_dwi(sh_true, data['gtab'])
+        # dwi_pred = shm.sh_to_dwi(sh_pred, data['gtab'])
+        # evals_true = metrics.ols_fit_tensor(dwi_true, data['gtab'])
+        # evals_pred = metrics.ols_fit_tensor(dwi_pred, data['gtab'])
+        # print_data(metrics.torch_fa(evals_true),
+        #           metrics.torch_fa(evals_pred),
+        #           mask)
 
         print_RIS(metrics.torch_RIS(sh_true), metrics.torch_RIS(sh_pred), mask)
         print_diff(sh_true, sh_pred, mask, 'mse', normalize=False)
@@ -154,6 +157,9 @@ class BaseTrainer():
               validation=True,
               metrics_final=None,
               freq_print=50):
+
+        train_dataset.set_return_site(False)
+        validation_dataset.set_return_site(False)
 
         dataloader_parameters = {
             "num_workers": 0,

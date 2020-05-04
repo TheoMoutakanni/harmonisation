@@ -2,7 +2,9 @@ from os.path import join as pjoin
 import os
 import random
 
-from harmonisation.settings import ADNI_PATH
+import pandas as pd
+
+from harmonisation.settings import ADNI_PATH, PPMI_PATH
 
 
 def get_paths_ADNI(patients=None):
@@ -19,6 +21,32 @@ def get_paths_ADNI(patients=None):
         for patient in patients]
 
     return path_dicts
+
+
+def get_paths_PPMI(patients=None):
+    if patients is None:
+        patients = [x for x in os.listdir(PPMI_PATH) if os.path.isdir(
+            pjoin(PPMI_PATH, x))]
+
+    sites = pd.read_csv(pjoin(PPMI_PATH, 'Center-Subject_List.csv'))
+    sites = sites.astype({'PATNO': 'str'})
+
+    sites = {p: s for p, s in zip(sites['PATNO'], sites['CNO']) if p in [
+        p.split('_')[0] for p in patients]}
+    sites_dict = {s: i for i, s in enumerate(sorted(set(sites.values())))}
+
+    path_dicts = [
+        {'name': patient,
+         'dwi': pjoin(PPMI_PATH, patient, 'dwi.nii.gz'),
+         't1': pjoin(PPMI_PATH, patient, 't1.nii.gz'),
+         'bval': pjoin(PPMI_PATH, patient, 'bval'),
+         'bvec': pjoin(PPMI_PATH, patient, 'bvec'),
+         'mask': pjoin(PPMI_PATH, patient, 'brain_mask.nii.gz'),
+         'site': sites_dict[sites[patient.split('_')[0]]],
+         }
+        for patient in patients]
+
+    return path_dicts, sites_dict
 
 
 def train_test_split(paths,

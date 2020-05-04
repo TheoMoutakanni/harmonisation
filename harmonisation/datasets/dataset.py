@@ -30,24 +30,25 @@ class SHDataset(torch.utils.data.Dataset):
         self.std = std
         self.patch_size = patch_size
 
+        self._return_site = False
+
         get_data = process_data
         if cache_dir is not None:
             memory = Memory(cache_dir + "/.cache/",
                             mmap_mode="r", verbose=0)
             get_data = memory.cache(get_data)
 
-        gtabs = [gradient_table(*read_bvals_bvecs(
+        gtabs = {path_dict['name']: gradient_table(*read_bvals_bvecs(
             path_dict["bval"], path_dict["bvec"]))
-            for path_dict in path_dicts]
+            for path_dict in path_dicts}
 
         self.data = Parallel(
             n_jobs=n_jobs,
             prefer="threads")(delayed(get_data)(
                 path_dict=path_dict,
-                gtab=gtab,
+                gtab=gtabs[path_dict['name']],
                 signal_parameters=signal_parameters,
-            ) for path_dict, gtab in tqdm.tqdm(zip(path_dicts, gtabs),
-                                               total=len(path_dicts)))
+            ) for path_dict in tqdm.tqdm(path_dicts))
 
         if normalize_data:
             self.normalize_data()
@@ -61,6 +62,11 @@ class SHDataset(torch.utils.data.Dataset):
                 d['mask'],
                 patch_size,
                 overlap_coeff=signal_parameters['overlap_coeff'])
+
+            # Remove patches with no data
+            d['empty'] = d['mask'].squeeze().sum(-1).sum(-1).sum(-1) == 0
+            d['sh'] = d['sh'][~d['empty']]
+            d['mask'] = d['mask'][~d['empty']]
 
         self.name_to_idx = {name: idx for idx, name in enumerate(self.names)}
         self.dataset_indexes = [(i, j) for i, d in enumerate(self.data)
@@ -82,7 +88,12 @@ class SHDataset(torch.utils.data.Dataset):
         if self.transformations is not None:
             signal = self.transformations(signal)
 
-        return signal, mask
+        if not self._return_site:
+            return signal, mask
+        else:
+            site = self.data[patient_idx]['site']
+            site = torch.LongTensor([site])
+            return signal, mask, site
 
     def get_data_by_name(self, dmri_name):
         """Return a dict with params:
@@ -103,3 +114,6 @@ class SHDataset(torch.utils.data.Dataset):
 
         for d in self.data:
             d['sh'] = (d['sh'] - self.mean) / self.std
+
+    def set_return_site(self, bool):
+        self._return_site = bool

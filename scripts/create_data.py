@@ -1,7 +1,7 @@
-from harmonisation.functions.shm import sh_to_dwi
+from harmonisation.functions.shm import sh_to_dwi, normalize_data
 from harmonisation.datasets import SHDataset
 from harmonisation.datasets.utils import batch_to_xyz
-from harmonisation.utils import get_paths_ADNI, train_test_split
+from harmonisation.utils import get_paths_ADNI
 from harmonisation.models import ENet
 
 from harmonisation.settings import SIGNAL_PARAMETERS
@@ -12,18 +12,20 @@ from dipy.core.gradients import gradient_table
 
 import numpy as np
 
-paths = get_paths_ADNI()
-path_train, _, _ = train_test_split(
-    paths,
-    test_proportion=0,
-    validation_proportion=0,
-    max_combined_size=None)
+save_folder = './.saved_models/128-8-8-8-ppmi/'
+dwi_file = '003_S_4288_S142486'
+net_file = '10_net'
 
-file = '003_S_4288_S142486'
-path_train = [d for d in path_train if d['name'] == file]
+SIGNAL_PARAMETERS['overlap_coeff'] = 3
+
+paths = get_paths_ADNI()
+
+paths = [d for d in paths if d['name'] == dwi_file]
+
+mean, std = np.load(save_folder + 'mean_std.npy')
 
 # Create the dataset
-dataset = SHDataset(path_train,
+dataset = SHDataset(paths,
                     patch_size=SIGNAL_PARAMETERS["patch_size"],
                     signal_parameters=SIGNAL_PARAMETERS,
                     transformations=None,
@@ -31,40 +33,44 @@ dataset = SHDataset(path_train,
                     n_jobs=8)
 
 # Load the network
-net, _ = ENet.load('../.saved_models/128-4-4-4/9_net')
+net, _ = ENet.load(save_folder + net_file)
 
 net = net.to("cuda")
 net.eval()
 
 # Get the dmri name
-print_name = dataset.names[0]
-print_data = dataset.get_data_by_name(print_name)
+dwi_name = dataset.names[0]
+data = dataset.get_data_by_name(dwi_name)
 
 sh_true = batch_to_xyz(
-    print_data['sh'],
-    print_data['real_size'],
-    SIGNAL_PARAMETERS['overlap_coeff'])
-
+    data['sh'],
+    data['real_size'],
+    empty=data['empty'],
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'])
 sh_true = sh_true * dataset.std + dataset.mean
 
-sh_pred = net.predict_dataset(dataset, batch_size=128)[print_name]
+sh_pred = net.predict_dataset(dataset, batch_size=128)[dwi_name]
 
 sh_pred = batch_to_xyz(
     sh_pred,
-    print_data['real_size'],
-    SIGNAL_PARAMETERS['overlap_coeff'])
+    data['real_size'],
+    empty=data['empty'],
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
+    regularization_sigma=10)
 sh_pred = sh_pred * dataset.std + dataset.mean
 
 mask = batch_to_xyz(
-    print_data['mask'],
-    print_data['real_size'],
-    SIGNAL_PARAMETERS['overlap_coeff'])
+    data['mask'],
+    data['real_size'],
+    empty=data['empty'],
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'])
 
-dwi_pred = sh_to_dwi(sh_pred, print_data['gtab'], mask, add_b0=False)
+dwi_pred = sh_to_dwi(sh_pred, data['gtab'], mask=None, add_b0=False)
 
-dwi_true, affine = load_nifti(path_train[0]['dwi'])
-gtab = gradient_table(*read_bvals_bvecs(
-    path_train[0]["bval"], path_train[0]["bvec"]))
+dwi_true, affine = load_nifti(paths[0]['dwi'])
+gtab = gradient_table(*read_bvals_bvecs(paths[0]["bval"], paths[0]["bvec"]))
+
+dwi_true = normalize_data(dwi_true, gtab.b0s_mask)
 
 patch_size = np.array(SIGNAL_PARAMETERS['patch_size'])
 pad_needed = patch_size - dwi_true.shape[:3] % patch_size
@@ -83,13 +89,13 @@ mask = mask[pad_needed[0][0]:-pad_needed[0][1],
             pad_needed[1][0]:-pad_needed[1][1],
             pad_needed[2][0]:-pad_needed[2][1]]
 
-dwi_pred *= np.expand_dims(dwi_true[..., gtab.b0s_mask].mean(-1), axis=-1)
+# # dwi_pred *= np.expand_dims(dwi_true[..., gtab.b0s_mask].mean(-1), axis=-1)
 dwi_pred = np.concatenate([dwi_true[..., gtab.b0s_mask], dwi_pred], axis=-1)
 
 assert dwi_pred.shape == dwi_true.shape, (dwi_true.shape, dwi_pred.shape)
 
-np.save("mask.npy", mask)
-save_nifti("sh_true.nii.gz", sh_true, affine)
-save_nifti("dwi_true.nii.gz", dwi_true, affine)
-save_nifti("sh_pred.nii.gz", sh_pred, affine)
-save_nifti("dwi_pred.nii.gz", dwi_pred, affine)
+save_nifti("./data/mask.nii.gz", mask, affine)
+save_nifti("./data/sh_true.nii.gz", sh_true, affine)
+save_nifti("./data/dwi_true.nii.gz", dwi_true, affine)
+save_nifti("./data/sh_pred.nii.gz", sh_pred, affine)
+save_nifti("./data/dwi_pred.nii.gz", dwi_pred, affine)

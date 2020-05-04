@@ -492,7 +492,7 @@ class ENet(BaseNet):
     def __init__(self,
                  patch_size,
                  sh_order,
-                 embed=128,
+                 embed=[32, 64, 128],
                  encoder_relu=False,
                  decoder_relu=True):
 
@@ -501,8 +501,9 @@ class ENet(BaseNet):
                          embed=embed,
                          encoder_relu=encoder_relu,
                          decoder_relu=decoder_relu)
-        embed1 = 32
-        embed2 = 64
+        embed1 = embed[0]
+        embed2 = embed[1]
+        embed = embed[2]
 
         self.ncoef = int((sh_order + 2) * (sh_order + 1) / 2)
         self.patch_size = patch_size
@@ -647,8 +648,21 @@ class ENet(BaseNet):
             stride=2,
             padding=1,
             bias=False)
-        self.regular5_2 = RegularBottleneck(
-            self.ncoef, padding=1, dropout_prob=0.1, relu=decoder_relu, out_activation=False)
+        self.conv5_2 = nn.Sequential(
+            nn.Conv3d(
+                self.ncoef,
+                self.ncoef,
+                kernel_size=5,
+                padding=2,
+                bias=True),
+            nn.BatchNorm3d(self.ncoef),
+            nn.ReLU(),
+            nn.Conv3d(
+                self.ncoef,
+                self.ncoef,
+                kernel_size=3,
+                padding=1,
+                bias=True))
 
     def forward(self, x):
         # Initial block
@@ -660,7 +674,7 @@ class ENet(BaseNet):
 
         # Stage 1 - Encoder
         stage1_input_size = x.size()
-        #x, max_indices1_0 = self.downsample1_0(x)
+        # x, max_indices1_0 = self.downsample1_0(x)
         x = self.replace_down1(x)
         x = self.regular1_1(x)
         x = self.regular1_2(x)
@@ -700,10 +714,10 @@ class ENet(BaseNet):
 
         # Stage 5 - Decoder
         x = self.replace_up5(x)
-        #x = self.upsample5_0(x, max_indices1_0, output_size=stage1_input_size)
+        # x = self.upsample5_0(x, max_indices1_0, output_size=stage1_input_size)
         x = self.regular5_1(x)
         x = self.transposed_conv(x, output_size=input_size)
-        # x = self.regular5_2(x)
+        x = self.conv5_2(x)
 
         x = x.permute((0, 2, 3, 4, 1))
 

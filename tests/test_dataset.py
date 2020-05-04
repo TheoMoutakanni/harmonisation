@@ -69,7 +69,7 @@ def test_dataset(ADNI_names, path_dicts, signal_params):
 
     assert list(signal.shape) == signal_params['patch_size'] + [ncoef]
 
-    assert len(dataset) == 945
+    assert len(dataset) == 608
 
     patient = np.random.choice(ADNI_names)
     dataset.get_data_by_name(patient)
@@ -162,13 +162,16 @@ def test_batch_xyz(ADNI_names, path_dicts, signal_params):
         data_batch = torch.FloatTensor(data_patient['sh'])
 
         data_xyz = batch_to_xyz(data_batch, data_patient['real_size'],
-                                overlap_coeff=signal_params['overlap_coeff'])
+                                overlap_coeff=signal_params['overlap_coeff'],
+                                empty=data_patient['empty'])
 
         assert data_xyz.shape[:3] == data_patient['real_size']
 
         data_batch_2, number_of_patches = xyz_to_batch(
             data_xyz, signal_params['patch_size'],
             overlap_coeff=signal_params['overlap_coeff'])
+
+        data_batch_2 = data_batch_2[~data_patient['empty']]
 
         assert torch.isclose(data_batch,
                              data_batch_2,
