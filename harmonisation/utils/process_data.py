@@ -8,7 +8,11 @@ import numpy as np
 
 def process_data(path_dict, gtab, signal_parameters):
     processing_parameters = signal_parameters["processing_params"]
-    data, affine = load_nifti(path_dict["dwi"])
+    try:
+        data, affine = load_nifti(path_dict["dwi"])
+    except Exception as e:
+        print(path_dict['name'])
+        raise e
     data = data[:].copy()
     # Crop the MRI
 

@@ -12,9 +12,10 @@ from dipy.core.gradients import gradient_table
 
 import numpy as np
 
-save_folder = './.saved_models/128-8-8-8-ppmi/'
+
+save_folder = "./.saved_models/bridge-IN-meanstd/"
 dwi_file = '003_S_4288_S142486'
-net_file = '10_net'
+net_file = '40_net.tar.gz'
 
 SIGNAL_PARAMETERS['overlap_coeff'] = 3
 
@@ -56,7 +57,7 @@ sh_pred = batch_to_xyz(
     data['real_size'],
     empty=data['empty'],
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-    regularization_sigma=10)
+    remove_border=2)
 sh_pred = sh_pred * dataset.std + dataset.mean
 
 mask = batch_to_xyz(
@@ -70,7 +71,10 @@ dwi_pred = sh_to_dwi(sh_pred, data['gtab'], mask=None, add_b0=False)
 dwi_true, affine = load_nifti(paths[0]['dwi'])
 gtab = gradient_table(*read_bvals_bvecs(paths[0]["bval"], paths[0]["bvec"]))
 
-dwi_true = normalize_data(dwi_true, gtab.b0s_mask)
+b0 = dwi_true[..., gtab.b0s_mask]
+mean_b0 = b0.mean(-1)
+
+# dwi_true = normalize_data(dwi_true, gtab.b0s_mask)
 
 patch_size = np.array(SIGNAL_PARAMETERS['patch_size'])
 pad_needed = patch_size - dwi_true.shape[:3] % patch_size
@@ -89,8 +93,8 @@ mask = mask[pad_needed[0][0]:-pad_needed[0][1],
             pad_needed[1][0]:-pad_needed[1][1],
             pad_needed[2][0]:-pad_needed[2][1]]
 
-# # dwi_pred *= np.expand_dims(dwi_true[..., gtab.b0s_mask].mean(-1), axis=-1)
-dwi_pred = np.concatenate([dwi_true[..., gtab.b0s_mask], dwi_pred], axis=-1)
+dwi_pred *= np.expand_dims(mean_b0, axis=-1)
+dwi_pred = np.concatenate([b0, dwi_pred], axis=-1)
 
 assert dwi_pred.shape == dwi_true.shape, (dwi_true.shape, dwi_pred.shape)
 

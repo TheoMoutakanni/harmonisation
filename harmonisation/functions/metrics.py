@@ -25,15 +25,13 @@ def torch_angular_corr_coeff(sh_U, sh_V):
     return acc
 
 
-def weighted_mse_loss(X, Z, weight):
-    return torch.sum(weight * (X - Z) ** 2, axis=-1) / torch.sum(weight)
+def weighted_mse_loss(X, Z, weight, axis=-1):
+    return torch.sum(weight * (X - Z) ** 2, axis=axis) / torch.sum(weight)
 
 
 def torch_accuracy(labels, proba):
     predicted = torch.argmax(proba, dim=1)
     accuracy = (predicted == labels).float().mean()
-    print(predicted)
-    print(labels)
     return accuracy
 
 
@@ -49,7 +47,7 @@ def torch_RIS(X):
 def torch_mse_RIS(X, Z, weight):
     X_RIS = torch_RIS(X)
     Z_RIS = torch_RIS(Z)
-    mse_RIS = weighted_mse_loss(X_gra, Z_gfa, weight)
+    mse_RIS = weighted_mse_loss(X_RIS, Z_RIS, weight, axis=-1)
     return mse_RIS
 
 
@@ -83,7 +81,7 @@ def torch_anisotropic_power(sh_coeffs, norm_factor=0.00001, power=2,
     dim = sh_coeffs.shape[:-1]
     n_coeffs = sh_coeffs.shape[-1]
     max_order = shm.calculate_max_order(n_coeffs)
-    ap = torch.zeros(dim)
+    ap = torch.zeros(dim).to(sh_coeffs.device)
     n_start = 1
     for L in range(2, max_order + 2, 2):
         n_stop = n_start + (2 * L + 1)
@@ -101,8 +99,8 @@ def torch_anisotropic_power(sh_coeffs, norm_factor=0.00001, power=2,
     if ap.ndim < 1:
         # For the off chance we have a scalar on our hands
         ap = torch.reshape(ap, (1, ))
-    log_ap = torch.zeros_like(ap)
-    log_ap[ap > 0] = torch.log(ap[ap > 0]) - torch.log(norm_factor)
+    log_ap = torch.zeros_like(ap).to(ap.device)
+    log_ap[ap > 0] = torch.log(ap[ap > 0]) - np.log(norm_factor)
 
     # Deal with residual negative values:
     if non_negative:
@@ -114,6 +112,13 @@ def torch_anisotropic_power(sh_coeffs, norm_factor=0.00001, power=2,
             if log_ap < 0:
                 return 0
     return log_ap
+
+
+def torch_mse_anisotropic_power(X, Z, weight):
+    X_ap = torch_anisotropic_power(X)
+    Z_ap = torch_anisotropic_power(Z)
+    mse_ap = weighted_mse_loss(X_ap, Z_ap, weight.squeeze())
+    return mse_ap
 
 
 def ols_fit_tensor(data, gtab=None, design_matrix=None,
@@ -216,5 +221,7 @@ def get_metrics_fun():
         'mse': lambda x, z, mask: -weighted_mse_loss(x, z, mask),
         'mse_RIS': lambda x, z, mask: -torch_mse_RIS(x, z, mask),
         'mse_gfa': lambda x, z, mask: -torch_mse_gfa(x, z, mask),
-        'accuracy': lambda labels, proba: torch_accuracy(labels, proba)
+        'mse_ap': lambda x, z, mask: -torch_mse_anisotropic_power(x, z, mask),
+
+        'accuracy': lambda labels, proba: torch_accuracy(labels, proba),
     }

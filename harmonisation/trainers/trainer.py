@@ -21,10 +21,11 @@ class BaseTrainer():
                      "lr": 0.001,
                      "weight_decay": 1e-8,
                  },
-                 loss_specs={
+                 loss_specs=[{
                      "type": "acc",
-                     "parameters": {}
-                 },
+                     "parameters": {},
+                     "coeff": 1,
+                 }],
                  metrics=["acc", "mse"],
                  metric_to_maximize="acc",
                  patience=10,
@@ -87,6 +88,8 @@ class BaseTrainer():
                                            batch_size=batch_size,
                                            names=[name])[name]
 
+        print('predicted')
+
         overlap_coeff = validation_dataset.signal_parameters['overlap_coeff']
 
         sh_pred = batch_to_xyz(
@@ -105,9 +108,13 @@ class BaseTrainer():
             empty=data['empty'],
             overlap_coeff=overlap_coeff)
 
+        print('batch')
+
         sh_pred = torch.FloatTensor(sh_pred)
         sh_true = torch.FloatTensor(sh_true)
         mask = torch.LongTensor(mask)
+
+        print('go')
 
         # print_peaks(sh_true)
         # print_peaks(sh_pred)
@@ -121,6 +128,9 @@ class BaseTrainer():
         print_data(metrics.torch_gfa(sh_true),
                    metrics.torch_gfa(sh_pred),
                    mask)
+        print_data(metrics.torch_anisotropic_power(sh_true),
+                   metrics.torch_anisotropic_power(sh_pred),
+                   mask)
 
         # dwi_true = shm.sh_to_dwi(sh_true, data['gtab'])
         # dwi_pred = shm.sh_to_dwi(sh_pred, data['gtab'])
@@ -133,13 +143,13 @@ class BaseTrainer():
         print_RIS(metrics.torch_RIS(sh_true), metrics.torch_RIS(sh_pred), mask)
         print_diff(sh_true, sh_pred, mask, 'mse', normalize=False)
 
-    def get_batch_loss(self, X, mask, Z=None):
+    def get_batch_loss(self, data):
         """ Single forward and backward pass """
 
-        if Z is None:
-            # If Z is not already given
-            X = X.to(self.net.device)
-            Z = self.net(X)
+        X, mask = data
+        X = X.to(self.net.device)
+
+        Z = self.net(X)
 
         X = X.to(self.net.device)
         mask = mask.to(self.net.device)
@@ -200,14 +210,16 @@ class BaseTrainer():
 
             epoch_loss_train = 0.0
 
-            for i, data in enumerate(dataloader_train, 0):
+            for i, data in tqdm(enumerate(dataloader_train, 0),
+                                total=len(train_dataset) // batch_size +
+                                int(len(train_dataset) % batch_size != 0),
+                                leave=False):
                 self.optimizer.zero_grad()
 
                 # Set network to train mode
                 self.net.train()
 
-                X, mask = data
-                batch_loss = self.get_batch_loss(X, mask)
+                batch_loss = self.get_batch_loss(data)
 
                 epoch_loss_train += batch_loss.item()
 
@@ -229,11 +241,11 @@ class BaseTrainer():
                 for metric in metrics_epoch.keys():
                     logger_metrics[metric].append(metrics_epoch[metric])
 
-                if epoch % freq_print == 0:  # and epoch != 0:
+                if epoch % freq_print == 0 and epoch != 0:
                     self.print_metrics(validation_dataset, batch_size)
 
             if self.save_folder:
-                self.net.save(self.save_folder + str(epoch) + "_net")
+                self.net.save(self.save_folder + str(epoch) + "_net.tar.gz")
 
             if metrics_epoch[self.metric_to_maximize] > best_value:
                 best_value = metrics_epoch[self.metric_to_maximize]

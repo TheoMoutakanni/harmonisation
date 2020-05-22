@@ -101,16 +101,15 @@ class AdversarialTrainer(BaseTrainer):
 
         return metrics_epoch
 
-    def get_batch_adv_loss(self, X, y, Z=None, coeff_fake=0.5):
+    def get_batch_adv_loss(self, data, Z=None, coeff_fake=0.5):
         """ Get the loss for the adversarial network
         Single forward and backward pass """
+        X, mask, y = data
         X = X.to(self.net.device)
         y = y.to(self.net.device)
 
         real_y = self.adv_net.forward(X)
         batch_loss_real = self.adv_loss(real_y, y.squeeze())
-
-        print(list(zip(y.squeeze().cpu().numpy(), torch.argmax(real_y, dim=1).detach().cpu().numpy())))
 
         batch_loss = (1 - coeff_fake) * batch_loss_real
 
@@ -124,21 +123,28 @@ class AdversarialTrainer(BaseTrainer):
 
         return Z, batch_loss
 
-    def get_batch_loss(self, X, mask, y, returnZ=False):
+    def get_batch_loss(self, data, returnZ=False):
         """ Get the loss + adversarial loss for the autoencoder
         Single forward and backward pass """
+        if len(data) == 3:
+            X, mask, y = data
+            y = y.to(self.net.device)
+        else:
+            X, mask = data
         X = X.to(self.net.device)
-        y = y.to(self.net.device)
         mask = mask.to(self.net.device)
 
         Z = self.net(X)
 
         batch_loss_reconst = self.loss(X, Z, mask)
 
-        pred_y = self.adv_net.forward(Z)
-        batch_loss_adv = -self.adv_loss(pred_y, y.squeeze())
+        if len(data) == 3:
+            pred_y = self.adv_net.forward(Z)
+            batch_loss_adv = -self.adv_loss(pred_y, y.squeeze())
 
-        batch_loss = batch_loss_reconst + batch_loss_adv
+            batch_loss = batch_loss_reconst + batch_loss_adv
+        else:
+            batch_loss = batch_loss_reconst
 
         if returnZ:
             return Z, batch_loss
@@ -199,9 +205,8 @@ class AdversarialTrainer(BaseTrainer):
                 # Set network to train mode
                 self.adv_net.train()
 
-                X, mask, y = data
                 _, batch_loss = self.get_batch_adv_loss(
-                    X, y, coeff_fake=coeff_fake)
+                    data, coeff_fake=coeff_fake)
 
                 epoch_loss_train += batch_loss.item()
 
@@ -307,8 +312,7 @@ class AdversarialTrainer(BaseTrainer):
                 self.net.train()
                 self.adv_net.train()
 
-                X, mask, y = data
-                Z, loss_autoencoder = self.get_batch_loss(X, mask, y,
+                Z, loss_autoencoder = self.get_batch_loss(data,
                                                           returnZ=True)
 
                 epoch_loss_train += loss_autoencoder.item()
@@ -319,7 +323,7 @@ class AdversarialTrainer(BaseTrainer):
                 self.adv_optimizer.zero_grad()
 
                 Z, batch_loss_classif = self.get_batch_adv_loss(
-                    X, y, Z=Z, coeff_fake=coeff_fake)
+                    data, Z=Z, coeff_fake=coeff_fake)
 
                 epoch_loss_train_adv += batch_loss_classif.item()
 

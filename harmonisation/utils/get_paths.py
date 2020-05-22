@@ -46,6 +46,8 @@ def get_paths_PPMI(patients=None):
          }
         for patient in patients]
 
+    sites_dict = {v: k for k, v in sites_dict.items()}
+
     return path_dicts, sites_dict
 
 
@@ -54,11 +56,24 @@ def train_test_split(paths,
                      validation_proportion,
                      seed=None,
                      max_combined_size=None,
+                     balanced_classes=None,
                      blacklist=[]):
     random.seed(seed)
+    paths = [x for x in paths if x['name'] not in blacklist]
     if max_combined_size is None:
         max_combined_size = len(paths)
-    paths = [x for x in paths[:max_combined_size] if x not in blacklist]
+    if not balanced_classes:
+        paths = paths[:max_combined_size]
+    else:
+        max_nb = max_combined_size // len(balanced_classes)
+        nb_classes = {k: 0 for k in balanced_classes}
+        new_paths = []
+        for path in paths:
+            if path['site'] in balanced_classes:
+                if nb_classes[path['site']] < max_nb:
+                    nb_classes[path['site']] += 1
+                    new_paths.append(path)
+        paths = new_paths
 
     index_test = int(len(paths) * test_proportion)
     random.shuffle(paths)

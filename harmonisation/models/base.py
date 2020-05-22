@@ -2,6 +2,7 @@ import tarfile
 import tempfile
 import json
 import shutil
+import tqdm
 
 import torch
 import torch.nn as nn
@@ -82,7 +83,7 @@ class BaseNet(nn.Module, object):
                 results[dmri_name] = []
                 number_of_batches = int(np.ceil(signal.shape[0] / batch_size))
 
-                for batch in range(number_of_batches):
+                for batch in tqdm.tqdm(range(number_of_batches), leave=False):
                     signal_batch = torch.FloatTensor(
                         signal[batch * batch_size:(batch + 1) * batch_size])
                     signal_batch = signal_batch.to(self.device)

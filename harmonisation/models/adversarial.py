@@ -4,7 +4,77 @@ from .base import BaseNet
 from .enet import InitialBlock, DownsamplingBottleneck, RegularBottleneck
 
 
+def conv_block_3d(in_dim, out_dim, activation, normalization):
+    return nn.Sequential(
+        nn.Conv3d(in_dim, out_dim, kernel_size=3, stride=1, padding=1),
+        normalization(out_dim),
+        activation,)
+
+
+def conv_trans_block_3d(in_dim, out_dim, activation, normalization):
+    return nn.Sequential(
+        nn.ConvTranspose3d(in_dim, out_dim, kernel_size=3,
+                           stride=2, padding=1, output_padding=1),
+        normalization(out_dim),
+        activation,)
+
+
+def max_pooling_3d():
+    return nn.MaxPool3d(kernel_size=2, stride=2, padding=0)
+
+
+def conv_block_2_3d(in_dim, out_dim, activation, normalization):
+    return nn.Sequential(
+        conv_block_3d(in_dim, out_dim, activation, normalization),
+        nn.Conv3d(out_dim, out_dim, kernel_size=3, stride=1, padding=1),
+        normalization(out_dim),)
+
+
 class AdversarialNet(BaseNet):
+    def __init__(self, in_dim, out_dim, num_filters, nb_layers, embed_size):
+        super(AdversarialNet, self).__init__(in_dim=in_dim,
+                                             out_dim=out_dim,
+                                             num_filters=num_filters,
+                                             nb_layers=nb_layers,
+                                             embed_size=embed_size)
+
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.num_filters = num_filters
+        self.nb_layers = nb_layers
+        self.embed_size = embed_size
+        activation = nn.LeakyReLU(0.2, inplace=True)
+        normalization = nn.BatchNorm3d
+
+        self.classifier = nn.Sequential(
+            *[nn.Sequential(
+                conv_block_2_3d(
+                    self.num_filters * 2**(i - 1) if i > 0 else self.in_dim,
+                    self.num_filters * 2**i,
+                    activation,
+                    normalization),
+                max_pooling_3d(),
+            )
+                for i in range(self.nb_layers)
+            ],
+            nn.Flatten(),
+            nn.Linear(
+                self.num_filters * 2**(self.nb_layers - 1) * int(
+                    (16 / (2**self.nb_layers))**3),
+                self.embed_size),
+            activation,
+            nn.Linear(self.embed_size, self.out_dim)
+        )
+
+    def forward(self, x):
+        x = x.permute((0, 4, 1, 2, 3))
+
+        out = self.classifier(x)
+
+        return out
+
+
+class OldAdversarialNet(BaseNet):
     """Generate the ENet model.
     Keyword arguments:
     - num_classes (int): the number of classes to segment.
@@ -22,7 +92,11 @@ class AdversarialNet(BaseNet):
                  number_of_classes,
                  embed=[16, 32, 64],
                  encoder_relu=False):
-        super().__init__()
+        super().__init__(patch_size=patch_size,
+                         sh_order=sh_order,
+                         number_of_classes=number_of_classes,
+                         embed=embed,
+                         encoder_relu=encoder_relu)
 
         self.ncoef = int((sh_order + 2) * (sh_order + 1) / 2)
         self.patch_size = patch_size

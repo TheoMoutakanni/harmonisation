@@ -1,6 +1,6 @@
 PPMI_PATH = '/home/theo/Documents/Data/PPMI/'
-ADNI_PATH = '/home/theo/Documents/Data/ADNI/'#'/media/theo/285EDDF95EDDC02C/Users/Public/Documents/ADNI'
-#'/home/theo/Documents/Data/ADNI/'
+ADNI_PATH = '/home/theo/Documents/Data/ADNI/'
+
 SIGNAL_PARAMETERS = {
     'patch_size': [16, 16, 16],
     'sh_order': 4,
@@ -30,14 +30,18 @@ TRAINER_PARAMETERS = {
         }
     },
     "loss_specs": {
-        "autoencoder": {
-            "type": "mse",
-            "parameters": {}
-        },
-        "adversarial": {
-            "type": "cross_entropy",
-            "parameters": {}
-        }
+        "autoencoder": [
+            {
+                "type": "mse",
+                "parameters": {},
+                "coeff": 1,
+            }],
+        "adversarial": [
+            {
+                "type": "cross_entropy",
+                "parameters": {},
+                "coeff": 1,
+            }]
     },
     "metrics": {
         "autoencoder": ["acc", "mse"],

@@ -24,15 +24,21 @@ def normalize_data(data, where_b0, min_signal=1e-5, out=None):
     return out
 
 
-def dwi_to_sh(data_dwi, gtab,
-              sh_order=4, mask=None, use_attenuation=True, smooth=0.006,
-              * args, **kwargs):
-
+def get_B_matrix(gtab, sh_order, smooth=0.006):
     x, y, z = gtab.gradients[~gtab.b0s_mask].T
     r, theta, phi = cart2sphere(x, y, z)
     B, m, n = real_sym_sh_basis(sh_order, theta[:, None], phi[:, None])
     L = -n * (n + 1)
     invB = smooth_pinv(B, np.sqrt(smooth) * L)
+
+    return B, invB
+
+
+def dwi_to_sh(data_dwi, gtab,
+              sh_order=4, mask=None, use_attenuation=True, smooth=0.006,
+              * args, **kwargs):
+
+    B, invB = get_B_matrix(gtab, sh_order, smooth=smooth)
 
     mini = .001
     maxi = .999
@@ -53,9 +59,8 @@ def dwi_to_sh(data_dwi, gtab,
 
 def sh_to_dwi(data_sh, gtab, mask=None, add_b0=True):
     sh_order = order_from_ncoef(data_sh.shape[-1])
-    x, y, z = gtab.gradients[~gtab.b0s_mask].T
-    r, theta, phi = cart2sphere(x, y, z)
-    B, m, n = real_sym_sh_basis(sh_order, theta[:, None], phi[:, None])
+
+    B, invB = get_B_matrix(gtab, sh_order, smooth=smooth)
 
     mini = .001
     maxi = .999
