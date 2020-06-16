@@ -1,7 +1,10 @@
 import torch.nn as nn
+import numpy as np
+from collections import OrderedDict
 
 from .base import BaseNet
 from .enet import InitialBlock, DownsamplingBottleneck, RegularBottleneck
+from .metric_module import FAModule, DWIModule
 
 
 def conv_block_3d(in_dim, out_dim, activation, normalization):
@@ -31,47 +34,84 @@ def conv_block_2_3d(in_dim, out_dim, activation, normalization):
 
 
 class AdversarialNet(BaseNet):
-    def __init__(self, in_dim, out_dim, num_filters, nb_layers, embed_size):
-        super(AdversarialNet, self).__init__(in_dim=in_dim,
-                                             out_dim=out_dim,
-                                             num_filters=num_filters,
-                                             nb_layers=nb_layers,
-                                             embed_size=embed_size)
+    def __init__(self, in_dim, out_dim, num_filters,
+                 nb_layers, embed_size, patch_size, gtab, sh_order, mean, std, return_dict_layers=False):
+        super(AdversarialNet,
+              self).__init__(in_dim=in_dim,
+                             out_dim=out_dim,
+                             num_filters=num_filters,
+                             nb_layers=nb_layers,
+                             embed_size=embed_size,
+                             patch_size=patch_size,
+                             # gtab=gtab,
+                             sh_order=sh_order,
+                             return_dict_layers=return_dict_layers)
 
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.num_filters = num_filters
         self.nb_layers = nb_layers
         self.embed_size = embed_size
+        self.patch_size = np.array(patch_size)
+        self.return_dict_layers = return_dict_layers
+
+        self.input_signals = ['sh', 'mean_b0']
+
+        self.dwi_module = DWIModule(gtab=gtab, sh_order=sh_order,
+                                    mean=mean, std=std)
+        self.fa_module = FAModule(gtab=self.dwi_module.gtab)
+
         activation = nn.LeakyReLU(0.2, inplace=True)
         normalization = nn.BatchNorm3d
 
-        self.classifier = nn.Sequential(
-            *[nn.Sequential(
-                conv_block_2_3d(
-                    self.num_filters * 2**(i - 1) if i > 0 else self.in_dim,
-                    self.num_filters * 2**i,
-                    activation,
-                    normalization),
-                max_pooling_3d(),
-            )
-                for i in range(self.nb_layers)
-            ],
-            nn.Flatten(),
-            nn.Linear(
-                self.num_filters * 2**(self.nb_layers - 1) * int(
-                    (16 / (2**self.nb_layers))**3),
-                self.embed_size),
-            activation,
-            nn.Linear(self.embed_size, self.out_dim)
-        )
+        classifier_feat = OrderedDict({})
+        for i in range(self.nb_layers):
+            classifier_feat['conv_feat_{}'.format(i)] = conv_block_2_3d(
+                self.num_filters * 2**(i - 1) if i > 0 else 1,  # self.in_dim,
+                self.num_filters * 2**i,
+                activation,
+                normalization)
+            classifier_feat['maxpool_{}'.format(i)] = max_pooling_3d()
+            classifier_feat['dropout_{}'.format(i)] = nn.Dropout3d(p=0.1)
 
-    def forward(self, x):
+        self.classifier_feat = nn.ModuleDict(classifier_feat)
+
+        self.classifier_dense = nn.ModuleDict(OrderedDict({
+            'dense_feat_1': nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(
+                    self.num_filters * 2**(self.nb_layers - 1) * int(
+                        np.prod(self.patch_size / (2**self.nb_layers))),
+                    self.embed_size),
+                activation,
+                nn.BatchNorm1d(self.embed_size),
+                # nn.Dropout3d(p=0.2),
+            )}))
+
+        self.classifier_out = nn.Linear(self.embed_size, self.out_dim)
+
+    def forward(self, x, mean_b0):
+        x = self.dwi_module(x, mean_b0)
+        x = self.fa_module(x)
+
         x = x.permute((0, 4, 1, 2, 3))
 
-        out = self.classifier(x)
+        out_feat = {}
+        for name, layer in self.classifier_feat.items():
+            x = layer(x)
+            out_feat[name] = x
 
-        return out
+        for name, layer in self.classifier_dense.items():
+            x = layer(x)
+            out_feat[name] = x
+
+        out = self.classifier_out(x)
+        out_feat['out'] = out
+
+        if self.return_dict_layers:
+            return out_feat
+        else:
+            return out
 
 
 class OldAdversarialNet(BaseNet):

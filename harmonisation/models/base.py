@@ -65,6 +65,33 @@ class BaseNet(nn.Module, object):
     def forward(self, X):
         raise NotImplementedError("Please implement this method")
 
+    def move_to(self, obj, device, numpy=False):
+        if torch.is_tensor(obj):
+            obj = obj.to(device)
+            if numpy:
+                return obj.numpy()
+            else:
+                return obj
+        elif isinstance(obj, dict):
+            res = {}
+            for k, v in obj.items():
+                res[k] = self.move_to(v, device, numpy=numpy)
+            return res
+        elif isinstance(obj, list):
+            res = []
+            for v in obj:
+                res.append(self.move_to(v, device, numpy=numpy))
+            return res
+        else:
+            raise TypeError("Invalid type for move_to")
+
+    def concatenate(self, obj):
+        if isinstance(obj[0], dict):
+            return {k: np.concatenate([d[k] for d in obj])
+                    for k in obj[0].keys()}
+        else:
+            return np.concatenate(obj)
+
     def predict_dataset(self, dataset, batch_size=128, names=None):
         """Predicts signals in dictionnary inference_dataset = {name: data}.
         """
@@ -78,19 +105,23 @@ class BaseNet(nn.Module, object):
 
             for dmri_name in names:
                 data = dataset.get_data_by_name(dmri_name)
-                signal = data['sh']
+                signals = [data[signal_name]
+                           for signal_name in self.input_signals]
 
                 results[dmri_name] = []
-                number_of_batches = int(np.ceil(signal.shape[0] / batch_size))
+                nb_input = signals[0].shape[0]
+                number_of_batches = int(np.ceil(nb_input / batch_size))
 
                 for batch in tqdm.tqdm(range(number_of_batches), leave=False):
-                    signal_batch = torch.FloatTensor(
+                    signal_batch = [torch.FloatTensor(
                         signal[batch * batch_size:(batch + 1) * batch_size])
-                    signal_batch = signal_batch.to(self.device)
-                    signal_pred = self.forward(signal_batch)
-                    results[dmri_name].append(signal_pred.to('cpu').numpy())
-
-                results[dmri_name] = np.concatenate(results[dmri_name])
+                        for signal in signals]
+                    signal_batch = [signal.to(self.device)
+                                    for signal in signal_batch]
+                    signal_pred = self.forward(*signal_batch)
+                    results[dmri_name].append(self.move_to(signal_pred, 'cpu',
+                                                           numpy=True))
+                results[dmri_name] = self.concatenate(results[dmri_name])
 
         return results
 

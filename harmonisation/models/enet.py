@@ -493,14 +493,20 @@ class ENet(BaseNet):
 
     def __init__(self,
                  sh_order,
-                 embed=[32, 64, 128],
+                 embed=[32, 64, 128, 256],
                  encoder_relu=False,
-                 decoder_relu=True):
+                 decoder_relu=True,
+                 return_dict_layers=False):
 
         super().__init__(sh_order=sh_order,
                          embed=embed,
                          encoder_relu=encoder_relu,
-                         decoder_relu=decoder_relu)
+                         decoder_relu=decoder_relu,
+                         return_dict_layers=return_dict_layers)
+
+        self.input_signals = ['sh']
+
+        self.return_dict_layers = return_dict_layers
 
         self.ncoef = int((sh_order + 2) * (sh_order + 1) / 2)
 
@@ -513,15 +519,16 @@ class ENet(BaseNet):
 
         self.norm_beforedown_1 = nn.InstanceNorm3d(embed[0], affine=True)
 
-        self.replace_down1 = nn.Sequential(
-            nn.Conv3d(
-                embed[0],
-                embed[1],
-                kernel_size=1,
-                stride=1,
-                bias=True),
-            nn.BatchNorm3d(embed[1]),
-            nn.ReLU())
+        # self.replace_down1 = nn.Sequential(
+        #     nn.Conv3d(
+        #         embed[0],
+        #         embed[1],
+        #         kernel_size=1,
+        #         stride=1,
+        #         bias=True),
+        #     nn.BatchNorm3d(embed[1]),
+        #     nn.ReLU())
+
         self.downsample1_0 = DownsamplingBottleneck(
             embed[0],
             embed[1],
@@ -541,15 +548,15 @@ class ENet(BaseNet):
 
         self.norm_beforedown_2 = nn.InstanceNorm3d(embed[1], affine=True)
 
-        self.replace_down2 = nn.Sequential(
-            nn.Conv3d(
-                embed[1],
-                embed[2],
-                kernel_size=1,
-                stride=1,
-                bias=True),
-            nn.BatchNorm3d(embed),
-            nn.ReLU())
+        # self.replace_down2 = nn.Sequential(
+        #     nn.Conv3d(
+        #         embed[1],
+        #         embed[2],
+        #         kernel_size=1,
+        #         stride=1,
+        #         bias=True),
+        #     nn.BatchNorm3d(embed),
+        #     nn.ReLU())
 
         self.downsample2_0 = DownsamplingBottleneck(
             embed[1],
@@ -570,79 +577,66 @@ class ENet(BaseNet):
             relu=encoder_relu)
         self.dilated2_4 = RegularBottleneck(
             embed[2], dilation=4, padding=4, dropout_prob=0.1, relu=encoder_relu)
-        # self.regular2_5 = RegularBottleneck(
-        #     embed[2], padding=1, dropout_prob=0.1, relu=encoder_relu)
-        # self.dilated2_6 = RegularBottleneck(
-        #     embed[2], dilation=8, padding=8, dropout_prob=0.1, relu=encoder_relu)
-        # self.asymmetric2_7 = RegularBottleneck(
-        #     embed[2],
-        #     kernel_size=5,
-        #     asymmetric=True,
-        #     padding=2,
-        #     dropout_prob=0.1,
-        #     relu=encoder_relu)
-        # self.dilated2_8 = RegularBottleneck(
-        #     embed[2], dilation=16, padding=16, dropout_prob=0.1, relu=encoder_relu)
 
         # Stage 3 - Encoder
-        # self.regular3_0 = RegularBottleneck(
-        #     embed[2], padding=1, dropout_prob=0.1, relu=encoder_relu)
-        # self.dilated3_1 = RegularBottleneck(
-        #     embed[2], dilation=2, padding=2, dropout_prob=0.1, relu=encoder_relu)
-        # self.asymmetric3_2 = RegularBottleneck(
-        #     embed[2],
-        #     kernel_size=5,
-        #     padding=2,
-        #     asymmetric=True,
-        #     dropout_prob=0.1,
-        #     relu=encoder_relu)
-        # self.dilated3_3 = RegularBottleneck(
-        #     embed[2], dilation=4, padding=4, dropout_prob=0.1, relu=encoder_relu)
-        # self.regular3_4 = RegularBottleneck(
-        #     embed[2], padding=1, dropout_prob=0.1, relu=encoder_relu)
-        # self.dilated3_5 = RegularBottleneck(
-        #     embed[2], dilation=8, padding=8, dropout_prob=0.1, relu=encoder_relu)
-        # self.asymmetric3_6 = RegularBottleneck(
-        #     embed[2],
-        #     kernel_size=5,
-        #     asymmetric=True,
-        #     padding=2,
-        #     dropout_prob=0.1,
-        #     relu=encoder_relu)
-        # self.dilated3_7 = RegularBottleneck(
-        #     embed[2], dilation=16, padding=16, dropout_prob=0.1, relu=encoder_relu)
-
-        # Stage 4 - Decoder
-        self.replace_up4 = nn.Sequential(
-            nn.Conv3d(
-                embed[2],
-                embed[1],
-                kernel_size=1,
-                stride=1,
-                bias=True),
-            nn.BatchNorm3d(embed[1]),
-            nn.ReLU())
+        self.downsample3_0 = DownsamplingBottleneck(
+            embed[2],
+            embed[3],
+            return_indices=True,
+            dropout_prob=0.1,
+            relu=encoder_relu)
+        self.regular3_1 = RegularBottleneck(
+            embed[3], padding=1, dropout_prob=0.1, relu=encoder_relu)
+        self.dilated3_2 = RegularBottleneck(
+            embed[3], dilation=2, padding=2, dropout_prob=0.1, relu=encoder_relu)
+        self.asymmetric3_3 = RegularBottleneck(
+            embed[3],
+            kernel_size=5,
+            padding=2,
+            asymmetric=True,
+            dropout_prob=0.1,
+            relu=encoder_relu)
+        self.dilated3_4 = RegularBottleneck(
+            embed[3], dilation=4, padding=4, dropout_prob=0.1, relu=encoder_relu)
 
         self.upsample4_0 = UpsamplingBottleneck(
-            embed[2], embed[1], dropout_prob=0.1, relu=decoder_relu)
+            embed[3], embed[2], dropout_prob=0.1, relu=decoder_relu)
         self.regular4_1 = RegularBottleneck(
-            embed[1], padding=1, dropout_prob=0.1, relu=decoder_relu)
+            embed[2], padding=1, dropout_prob=0.1, relu=decoder_relu)
         self.regular4_2 = RegularBottleneck(
+            embed[2], padding=1, dropout_prob=0.1, relu=decoder_relu)
+
+        # Stage 4 - Decoder
+        # self.replace_up4 = nn.Sequential(
+        #     nn.Conv3d(
+        #         embed[2],
+        #         embed[1],
+        #         kernel_size=1,
+        #         stride=1,
+        #         bias=True),
+        #     nn.BatchNorm3d(embed[1]),
+        #     nn.ReLU())
+
+        self.upsample5_0 = UpsamplingBottleneck(
+            embed[2], embed[1], dropout_prob=0.1, relu=decoder_relu)
+        self.regular5_1 = RegularBottleneck(
+            embed[1], padding=1, dropout_prob=0.1, relu=decoder_relu)
+        self.regular5_2 = RegularBottleneck(
             embed[1], padding=1, dropout_prob=0.1, relu=decoder_relu)
 
         # Stage 5 - Decoder
-        self.replace_up5 = nn.Sequential(
-            nn.Conv3d(
-                embed[1],
-                embed[0],
-                kernel_size=1,
-                stride=1,
-                bias=True),
-            nn.BatchNorm3d(embed[0]),
-            nn.ReLU())
-        self.upsample5_0 = UpsamplingBottleneck(
+        # self.replace_up5 = nn.Sequential(
+        #     nn.Conv3d(
+        #         embed[1],
+        #         embed[0],
+        #         kernel_size=1,
+        #         stride=1,
+        #         bias=True),
+        #     nn.BatchNorm3d(embed[0]),
+        #     nn.ReLU())
+        self.upsample6_0 = UpsamplingBottleneck(
             embed[1], embed[0], dropout_prob=0.1, relu=decoder_relu)
-        self.regular5_1 = RegularBottleneck(
+        self.regular6_1 = RegularBottleneck(
             embed[0], padding=1, dropout_prob=0.1, relu=decoder_relu)
 
         self.transposed_conv = nn.ConvTranspose3d(
@@ -653,7 +647,7 @@ class ENet(BaseNet):
             padding=1,
             bias=False)
 
-        self.conv5_2 = nn.Sequential(
+        self.conv6_2 = nn.Sequential(
             nn.Conv3d(
                 self.ncoef,
                 self.ncoef,
@@ -665,8 +659,7 @@ class ENet(BaseNet):
             nn.Conv3d(
                 self.ncoef,
                 self.ncoef * 2,
-                kernel_size=3,
-                padding=1,
+                kernel_size=1,
                 bias=True))
 
         self.convout_1 = nn.Sequential(
@@ -675,7 +668,7 @@ class ENet(BaseNet):
                 self.ncoef * 2,
                 kernel_size=1,
                 bias=True),
-            nn.Upsample(scale_factor=2, mode='nearest'))
+            nn.Upsample(scale_factor=2, mode='trilinear'))
 
         self.convout_2 = nn.Sequential(
             nn.Conv3d(
@@ -683,7 +676,7 @@ class ENet(BaseNet):
                 self.ncoef * 2,
                 kernel_size=1,
                 bias=True),
-            nn.Upsample(scale_factor=4, mode='nearest'))
+            nn.Upsample(scale_factor=4, mode='trilinear'))
 
         self.convout_3 = nn.Sequential(
             nn.Conv3d(
@@ -691,23 +684,31 @@ class ENet(BaseNet):
                 self.ncoef * 2,
                 kernel_size=1,
                 bias=True),
-            nn.Upsample(scale_factor=8, mode='nearest'))
+            nn.Upsample(scale_factor=8, mode='trilinear'))
+
+        self.convout_4 = nn.Sequential(
+            nn.Conv3d(
+                embed[3],
+                self.ncoef * 2,
+                kernel_size=1,
+                bias=True),
+            nn.Upsample(scale_factor=16, mode='trilinear'))
 
     def forward(self, x):
         # Initial block
 
         x = x.permute((0, 4, 1, 2, 3))
 
+        x_feat = dict()
+
         input_size = x.size()
 
-        x_beforedown_0 = self.norm_beforedown_0(x)
-        x = x_beforedown_0
+        x_beforedown_0 = x  # self.norm_beforedown_0(x)
+        # x = x_beforedown_0
         x = self.initial_block(x)
 
-        x_out_1 = self.convout_1(x)
-
         # Stage 1 - Encoder
-        x_beforedown_1 = self.norm_beforedown_1(x)
+        x_beforedown_1 = x  # self.norm_beforedown_1(x)
         stage1_input_size = x.size()
         x, max_indices1_0 = self.downsample1_0(x)
         # x = self.replace_down1(x)
@@ -716,10 +717,8 @@ class ENet(BaseNet):
         # x = self.regular1_3(x)
         # x = self.regular1_4(x)
 
-        x_out_2 = self.convout_2(x)
-
         # Stage 2 - Encoder
-        x_beforedown_2 = self.norm_beforedown_2(x)
+        x_beforedown_2 = x  # self.norm_beforedown_2(x)
         stage2_input_size = x.size()
         x, max_indices2_0 = self.downsample2_0(x)
         # x = self.replace_down2(x)
@@ -728,49 +727,79 @@ class ENet(BaseNet):
         x = self.dilated2_2(x)
         x = self.asymmetric2_3(x)
         x = self.dilated2_4(x)
-        # x = self.regular2_5(x)
-        # x = self.dilated2_6(x)
-        # x = self.asymmetric2_7(x)
-        # x = self.dilated2_8(x)
 
         # Stage 3 - Encoder
-        # x = self.regular3_0(x)
-        # x = self.dilated3_1(x)
-        # x = self.asymmetric3_2(x)
-        # x = self.dilated3_3(x)
-        # x = self.regular3_4(x)
-        # x = self.dilated3_5(x)
-        # x = self.asymmetric3_6(x)
-        # x = self.dilated3_7(x)
+        x_beforedown_3 = x  # self.norm_beforedown_3(x)
+        stage3_input_size = x.size()
+        x, max_indices3_0 = self.downsample3_0(x)
 
-        x_out_3 = self.convout_3(x)
+        x = self.regular3_1(x)
+        x = self.dilated3_2(x)
+        x = self.asymmetric3_3(x)
+        x = self.dilated3_4(x)
 
-        # Stage 4 - Decoder
-        x = self.upsample4_0(x, max_indices2_0, output_size=stage2_input_size)
-        x = x + x_beforedown_2
+        x_out_4 = self.convout_4(x)
+
+        # Stage 5 - Decoder
+        x = self.upsample4_0(x, max_indices3_0, output_size=stage3_input_size)
+        x = x + x_beforedown_3
         # x = self.replace_up4(x)
 
         x = self.regular4_1(x)
         x = self.regular4_2(x)
 
+        x_out_3 = self.convout_3(x)
+
         # Stage 5 - Decoder
-        # x = self.replace_up5(x)
-        x = self.upsample5_0(x, max_indices1_0, output_size=stage1_input_size)
-        x = x + x_beforedown_1
+        x = self.upsample5_0(x, max_indices2_0, output_size=stage2_input_size)
+        x = x + x_beforedown_2
+        # x = self.replace_up4(x)
+
         x = self.regular5_1(x)
+        x = self.regular5_2(x)
+
+        x_out_2 = self.convout_2(x)
+
+        # Stage 6 - Decoder
+        # x = self.replace_up5(x)
+        x = self.upsample6_0(x, max_indices1_0, output_size=stage1_input_size)
+        x = x + x_beforedown_1
+        x = self.regular6_1(x)
+
+        x_out_1 = self.convout_1(x)
+
         x = self.transposed_conv(x, output_size=input_size)
-        x = self.conv5_2(x)
+        x = self.conv6_2(x)
 
-        mean_0, std_0 = x[:, :self.ncoef], x[:, self.ncoef:]
-        mean_1, std_1 = x_out_1[:, :self.ncoef], x[:, self.ncoef:]
-        mean_2, std_2 = x_out_2[:, :self.ncoef], x[:, self.ncoef:]
-        mean_3, std_3 = x_out_3[:, :self.ncoef], x[:, self.ncoef:]
+        beta_0, alpha_0 = x[:, :self.ncoef], x[:, self.ncoef:]
+        beta_1, alpha_1 = x_out_1[:, :self.ncoef], x_out_1[:, self.ncoef:]
+        beta_2, alpha_2 = x_out_2[:, :self.ncoef], x_out_2[:, self.ncoef:]
+        beta_3, alpha_3 = x_out_3[:, :self.ncoef], x_out_3[:, self.ncoef:]
+        beta_4, alpha_4 = x_out_4[:, :self.ncoef], x_out_4[:, self.ncoef:]
 
-        mean = mean_0 + mean_1 + mean_2 + mean_3
-        std = std_0 + std_1 + std_2 + std_3
+        alpha = alpha_0 + alpha_1 + alpha_2 + alpha_3 + alpha_4
+        beta = beta_0 + beta_1 + beta_2 + beta_3 + beta_4
 
-        x = x_beforedown_0 * std + mean
+        if self.return_dict_layers:
+            x_feat['beta'] = beta.permute((0, 2, 3, 4, 1))
+            x_feat['beta_1'] = beta_1.permute((0, 2, 3, 4, 1))
+            x_feat['beta_2'] = beta_2.permute((0, 2, 3, 4, 1))
+            x_feat['beta_3'] = beta_3.permute((0, 2, 3, 4, 1))
+            x_feat['beta_4'] = beta_4.permute((0, 2, 3, 4, 1))
+            x_feat['alpha'] = alpha.permute((0, 2, 3, 4, 1))
+            x_feat['alpha_1'] = alpha_1.permute((0, 2, 3, 4, 1))
+            x_feat['alpha_2'] = alpha_2.permute((0, 2, 3, 4, 1))
+            x_feat['alpha_3'] = alpha_3.permute((0, 2, 3, 4, 1))
+            x_feat['alpha_4'] = alpha_4.permute((0, 2, 3, 4, 1))
+
+        x = x_beforedown_0 * (1 + alpha) + beta
 
         x = x.permute((0, 2, 3, 4, 1))
 
-        return x
+        if self.return_dict_layers:
+            x_feat['out'] = x
+
+        if self.return_dict_layers:
+            return x_feat
+        else:
+            return x

@@ -1,8 +1,9 @@
 PPMI_PATH = '/home/theo/Documents/Data/PPMI/'
 ADNI_PATH = '/home/theo/Documents/Data/ADNI/'
+SIMON_PATH = '/media/theo/285EDDF95EDDC02C/Users/Public/Documents/SIMON/CCNA/'
 
 SIGNAL_PARAMETERS = {
-    'patch_size': [16, 16, 16],
+    'patch_size': [32, 32, 32],
     'sh_order': 4,
     'overlap_coeff': 2,
     'processing_params': {

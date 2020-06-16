@@ -146,7 +146,7 @@ class BaseTrainer():
     def get_batch_loss(self, data):
         """ Single forward and backward pass """
 
-        X, mask = data
+        X, mask, mean_b0 = data
         X = X.to(self.net.device)
 
         Z = self.net(X)

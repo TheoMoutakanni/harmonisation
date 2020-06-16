@@ -4,7 +4,7 @@ import torch
 from os.path import join as pjoin
 
 from harmonisation.datasets import SHDataset
-from harmonisation.utils import get_paths_ADNI, train_test_split
+from harmonisation.utils import get_paths_ADNI, train_test_val_split
 from harmonisation.trainers import BaseTrainer
 from harmonisation.models import ENet
 
@@ -31,6 +31,7 @@ def path_dicts(ADNI_names):
 def signal_params():
     signal_parameters = {
         'patch_size': [12, 12, 12],
+        'sh_order': 4,
         'overlap_coeff': 1,
         'processing_params': {
             'median_otsu_params': {
@@ -38,7 +39,6 @@ def signal_params():
                 'numpass': 1,
             },
             'sh_params': {
-                'sh_order': 4,
                 'smooth': 0.006,
             }
         }

@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from dipy.reconst import shm, dti
+import dipy.reconst.dti as dti
 
 
 def nanmean(v, inplace=False, *args, **kwargs):

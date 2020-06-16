@@ -86,17 +86,18 @@ class AdversarialTrainer(BaseTrainer):
         for name in list(set(data_pred.keys()) & set(data_true.keys())):
             dic = dict()
             for metric in self.adv_metrics:
-                dic[metric] = np.nanmean(metrics_fun[metric](
-                    torch.FloatTensor([data_true[name]['site']]),
-                    torch.FloatTensor(data_pred[name])
-                ))
+                dic[metric + '_' + name.split('_')[-1]] = np.nanmean(
+                    metrics_fun[metric](
+                        torch.FloatTensor([data_true[name]['site']]),
+                        torch.FloatTensor(data_pred[name])
+                    ))
 
             metrics_batches.append(dic)
 
         metrics_epoch = {
             metric: np.nanmean(
                 [m[metric] for m in metrics_batches])
-            for metric in self.adv_metrics
+            for metric in dic  # self.adv_metrics
         }
 
         return metrics_epoch
@@ -104,7 +105,7 @@ class AdversarialTrainer(BaseTrainer):
     def get_batch_adv_loss(self, data, Z=None, coeff_fake=0.5):
         """ Get the loss for the adversarial network
         Single forward and backward pass """
-        X, mask, y = data
+        X, mask, mean_b0, y = data
         X = X.to(self.net.device)
         y = y.to(self.net.device)
 
@@ -126,11 +127,11 @@ class AdversarialTrainer(BaseTrainer):
     def get_batch_loss(self, data, returnZ=False):
         """ Get the loss + adversarial loss for the autoencoder
         Single forward and backward pass """
-        if len(data) == 3:
-            X, mask, y = data
+        if len(data) == 4:
+            X, mask, mean_b0, y = data
             y = y.to(self.net.device)
         else:
-            X, mask = data
+            X, mask, mean_b0 = data
         X = X.to(self.net.device)
         mask = mask.to(self.net.device)
 

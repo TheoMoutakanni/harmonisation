@@ -57,7 +57,7 @@ def dwi_to_sh(data_dwi, gtab,
     return data_sh
 
 
-def sh_to_dwi(data_sh, gtab, mask=None, add_b0=True):
+def sh_to_dwi(data_sh, gtab, mask=None, add_b0=True, smooth=0.006):
     sh_order = order_from_ncoef(data_sh.shape[-1])
 
     B, invB = get_B_matrix(gtab, sh_order, smooth=smooth)

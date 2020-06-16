@@ -1,7 +1,7 @@
 from harmonisation.functions.shm import sh_to_dwi, normalize_data
 from harmonisation.datasets import SHDataset
 from harmonisation.datasets.utils import batch_to_xyz
-from harmonisation.utils import get_paths_ADNI
+from harmonisation.utils import get_paths_ADNI, get_paths_SIMON
 from harmonisation.models import ENet
 
 from harmonisation.settings import SIGNAL_PARAMETERS
@@ -13,13 +13,13 @@ from dipy.core.gradients import gradient_table
 import numpy as np
 
 
-save_folder = "./.saved_models/bridge-IN-meanstd/"
-dwi_file = '003_S_4288_S142486'
-net_file = '40_net.tar.gz'
+save_folder = "./.saved_models/style_fa/"
+dwi_file = 'HAM_DTI_2018'  # '003_S_4288_S142486'
+net_file = '49_net.tar.gz'
 
-SIGNAL_PARAMETERS['overlap_coeff'] = 3
+SIGNAL_PARAMETERS['overlap_coeff'] = 2
 
-paths = get_paths_ADNI()
+paths, _ = get_paths_SIMON()  # get_paths_ADNI()
 
 paths = [d for d in paths if d['name'] == dwi_file]
 
@@ -50,14 +50,14 @@ sh_true = batch_to_xyz(
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'])
 sh_true = sh_true * dataset.std + dataset.mean
 
-sh_pred = net.predict_dataset(dataset, batch_size=128)[dwi_name]
+sh_pred = net.predict_dataset(dataset, batch_size=16)[dwi_name]
 
 sh_pred = batch_to_xyz(
     sh_pred,
     data['real_size'],
     empty=data['empty'],
-    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-    remove_border=2)
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],)
+    #remove_border=2)
 sh_pred = sh_pred * dataset.std + dataset.mean
 
 mask = batch_to_xyz(
@@ -94,7 +94,10 @@ mask = mask[pad_needed[0][0]:-pad_needed[0][1],
             pad_needed[2][0]:-pad_needed[2][1]]
 
 dwi_pred *= np.expand_dims(mean_b0, axis=-1)
-dwi_pred = np.concatenate([b0, dwi_pred], axis=-1)
+temp = np.zeros_like(dwi_true)
+temp[..., ~gtab.b0s_mask] = dwi_pred
+temp[..., gtab.b0s_mask] = b0
+dwi_pred = temp  # np.concatenate([b0, dwi_pred], axis=-1)
 
 assert dwi_pred.shape == dwi_true.shape, (dwi_true.shape, dwi_pred.shape)
 

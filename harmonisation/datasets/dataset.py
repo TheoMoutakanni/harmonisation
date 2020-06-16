@@ -62,11 +62,16 @@ class SHDataset(torch.utils.data.Dataset):
                 d['mask'],
                 patch_size,
                 overlap_coeff=signal_parameters['overlap_coeff'])
+            d['mean_b0'], _ = xyz_to_batch(
+                d['mean_b0'],
+                patch_size,
+                overlap_coeff=signal_parameters['overlap_coeff'])
 
             # Remove patches with no data
             d['empty'] = d['mask'].squeeze().sum(-1).sum(-1).sum(-1) == 0
             d['sh'] = d['sh'][~d['empty']]
             d['mask'] = d['mask'][~d['empty']]
+            d['mean_b0'] = d['mean_b0'][~d['empty']]
 
         self.name_to_idx = {name: idx for idx, name in enumerate(self.names)}
         self.dataset_indexes = [(i, j) for i, d in enumerate(self.data)
@@ -81,19 +86,21 @@ class SHDataset(torch.utils.data.Dataset):
         patient_idx, patch_idx = self.dataset_indexes[idx]
         signal = self.data[patient_idx]['sh'][patch_idx]
         mask = self.data[patient_idx]['mask'][patch_idx]
+        mean_b0 = self.data[patient_idx]['mean_b0'][patch_idx]
 
         signal = torch.FloatTensor(signal)
         mask = torch.LongTensor(mask)
+        mean_b0 = torch.LongTensor(mean_b0)
 
         if self.transformations is not None:
             signal = self.transformations(signal)
 
         if not self._return_site:
-            return signal, mask
+            return signal, mask, mean_b0
         else:
             site = self.data[patient_idx]['site']
             site = torch.LongTensor([site])
-            return signal, mask, site
+            return signal, mask, mean_b0, site
 
     def get_data_by_name(self, dmri_name):
         """Return a dict with params:

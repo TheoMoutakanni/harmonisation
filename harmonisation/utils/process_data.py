@@ -26,9 +26,13 @@ def process_data(path_dict, gtab, signal_parameters):
             autocrop=True,
             **processing_parameters['median_otsu_params'])
 
-    data = normalize_data(data, gtab.b0s_mask)
-
     mask = np.expand_dims(mask.astype(int), axis=-1)
+
+    mean_b0 = data[..., gtab.b0s_mask].mean(-1)
+    mean_b0 = np.expand_dims(mean_b0, axis=-1)
+    mean_b0 *= mask
+
+    data = normalize_data(data, gtab.b0s_mask)
 
     sh_coeff = dwi_to_sh(data, gtab, mask=mask,
                          sh_order=signal_parameters['sh_order'],
@@ -41,13 +45,16 @@ def process_data(path_dict, gtab, signal_parameters):
 
     sh_coeff = np.pad(sh_coeff, pad_width=pad_needed)
     mask = np.pad(mask, pad_width=pad_needed)
+    mean_b0 = np.pad(mean_b0, pad_width=pad_needed)
 
     real_size = sh_coeff.shape[:3]
 
     sh_coeff = sh_coeff.astype(np.float32)
+    mean_b0 = mean_b0.astype(np.float32)
 
     data = {'sh': sh_coeff,
             'mask': mask,
+            'mean_b0': mean_b0,
             'real_size': real_size,
             'gtab': gtab}
 

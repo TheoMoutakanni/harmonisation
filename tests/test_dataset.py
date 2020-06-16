@@ -39,6 +39,7 @@ def cache_directory():
 def signal_params():
     signal_parameters = {
         'patch_size': [12, 12, 12],
+        'sh_order': 4,
         'overlap_coeff': 1,
         'processing_params': {
             'median_otsu_params': {
@@ -46,7 +47,6 @@ def signal_params():
                 'numpass': 1,
             },
             'sh_params': {
-                'sh_order': 4,
                 'smooth': 0.006,
             }
         }
@@ -62,7 +62,7 @@ def test_dataset(ADNI_names, path_dicts, signal_params):
                         n_jobs=-1,
                         cache_dir=None)
 
-    sh_order = signal_params['processing_params']['sh_params']['sh_order']
+    sh_order = signal_params['sh_order']
     ncoef = (sh_order + 2) * (sh_order + 1) / 2
 
     signal, mask = dataset[300]

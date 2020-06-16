@@ -5,7 +5,7 @@ import numpy as np
 
 from harmonisation.datasets import SHDataset
 from harmonisation.utils import (get_paths_ADNI, get_paths_PPMI,
-                                 train_test_split)
+                                 train_test_val_split)
 from harmonisation.trainers import BaseTrainer
 from harmonisation.functions.shm import get_B_matrix
 from harmonisation.models import ENet, UNet, DisNet
@@ -18,7 +18,7 @@ blacklist = ['003_S_4288_S142486', '3169_BL_01',
              '3169_V04_00', '3168_BL_00', '3167_SC_01']
 paths, sites_dict = get_paths_PPMI()
 # paths = get_paths_ADNI()
-path_train, path_validation, path_test = train_test_split(
+path_train, path_validation, path_test = train_test_val_split(
     paths,
     test_proportion=0,
     validation_proportion=0.1,
