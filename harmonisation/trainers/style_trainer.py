@@ -19,6 +19,7 @@ class StyleTrainer(BaseTrainer):
     def __init__(self,
                  net,
                  feat_net,
+                 modules={},
                  optimizer_parameters={
                      "autoencoder": {
                          "lr": 0.01,
@@ -62,22 +63,24 @@ class StyleTrainer(BaseTrainer):
 
         self.metric_to_maximize = metric_to_maximize["autoencoder"]
         self.metrics = metrics["autoencoder"]
-        self.loss = get_loss_fun(loss_specs["autoencoder"])
-        self.style_loss = get_loss_fun(loss_specs["style"])
+        self.losses = get_loss_fun(loss_specs["autoencoder"])
+        self.style_losses = get_loss_fun(loss_specs["style"])
         self.optimizer = optim.Adam(
             self.net.parameters(), **optimizer_parameters["autoencoder"])
 
         self.feat_metric_to_maximize = metric_to_maximize["features"]
         self.feat_metrics = metrics["features"]
-        self.feat_loss = get_loss_fun(loss_specs["features"])
+        self.feat_losses = get_loss_fun(loss_specs["features"])
         self.feat_optimizer = optim.Adam(
             self.feat_net.parameters(), **optimizer_parameters["features"])
+
+        self.modules = modules
 
         self.patience = patience
         self.save_folder = save_folder
 
     def set_style_loss(self, loss_specs):
-        self.style_loss = get_loss_fun(loss_specs)
+        self.style_losses = get_loss_fun(loss_specs)
 
     def validate_feat(self, dataset, batch_size=128, adversarial=True):
         """
@@ -102,7 +105,7 @@ class StyleTrainer(BaseTrainer):
                 dic[metric] = np.nanmean(
                     metrics_fun[metric](
                         torch.FloatTensor([data_true[name]['site']]),
-                        torch.FloatTensor(data_pred[name]['out'])
+                        torch.FloatTensor(data_pred[name]['y_proba'])
                     ))
 
             metrics_batches.append(dic)
@@ -115,52 +118,74 @@ class StyleTrainer(BaseTrainer):
 
         return metrics_epoch
 
-    def get_batch_feat_loss(self, data, Z=None, coeff_fake=0.):
+    def get_batch_feat_loss(self, inputs, coeff_fake=0.):
         """ Get the loss for the adversarial network
         Single forward and backward pass """
-        X, mask, mean_b0, y = data
-        X = X.to(self.net.device)
-        y = y.to(self.net.device)
-        mean_b0 = mean_b0.to(self.net.device)
+        for input_name in inputs.keys():
+            inputs[input_name] = inputs[input_name].to(self.net.device)
 
         batch_loss = 0
 
         if coeff_fake < 1:
-            real_y = self.feat_net.forward(X, mean_b0)['out']
-            batch_loss_real = self.feat_loss(real_y, y.squeeze())
+            feat_net_pred = self.feat_net.forward(inputs['sh'],
+                                                  inputs['mean_b0'],
+                                                  inputs['mask'])
+            batch_loss_real = self.feat_losses[0]['fun'](feat_net_pred['y_proba'],
+                                                         inputs['site'].squeeze(-1))
 
             batch_loss += (1 - coeff_fake) * batch_loss_real
 
         if coeff_fake > 0:
-            if Z is None:
-                Z = self.net(X)
-            fake_y = self.feat_net.forward(Z.detach(), mean_b0)['out']
-            batch_loss_fake = self.feat_loss(fake_y, y.squeeze())
+            if 'sh_pred' not in inputs.keys():
+                inputs.update(self.net(inputs['sh'], inputs['mean_b0']))
+            feat_net_pred = self.feat_net.forward(inputs['sh_pred'].detach(),
+                                                  inputs['mean_b0_pred'].detach(),
+                                                  inputs['mask'])
+            batch_loss_fake = self.feat_losses[0]['fun'](feat_net_pred['y_proba'],
+                                                         inputs['site'].squeeze(-1))
 
             batch_loss += coeff_fake * batch_loss_fake
 
-        return Z, batch_loss
+        return inputs, batch_loss
 
-    def get_batch_loss(self, data):
+    def get_batch_loss(self, inputs):
         """ Get the loss + adversarial loss for the autoencoder
         Single forward and backward pass """
 
-        X, mask, mean_b0 = data
-        X = X.to(self.net.device)
-        mask = mask.to(self.net.device)
-        mean_b0 = mean_b0.to(self.net.device)
+        for input_name in inputs.keys():
+            inputs[input_name] = inputs[input_name].to(self.net.device)
 
-        Z = self.net(X)
+        net_pred = self.net(inputs['sh'], inputs['mean_b0'])
+        inputs.update(net_pred)
 
-        batch_loss_reconst = self.loss(X, Z, mask)
+        feat_net_pred = self.feat_net.forward(inputs['sh_pred'],
+                                              inputs['mean_b0_pred'],
+                                              inputs['mask'])
+        inputs.update(feat_net_pred)
 
-        pred_y = self.feat_net.forward(Z, mean_b0)
+        inputs_needed = [inp for loss in self.losses + self.style_losses
+                         for inp in loss['inputs']]
+        inputs = self.compute_modules(inputs_needed, inputs)
 
-        batch_loss_style = self.style_loss(pred_y)
+        batch_loss_reconst = []
+        for loss_d in self.losses:
+            loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
+            loss = loss_d['coeff'] * loss
+            batch_loss_reconst.append(loss)
+        batch_loss_reconst = torch.stack(batch_loss_reconst, dim=0).sum()
+
+        batch_loss_style = []
+        for loss_d in self.style_losses:
+            loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
+            loss = loss_d['coeff'] * loss
+            batch_loss_style.append(loss)
+        batch_loss_style = torch.stack(batch_loss_style, dim=0).sum()
+
         print(batch_loss_reconst, batch_loss_style)
+
         batch_loss = batch_loss_reconst + batch_loss_style
 
-        return batch_loss
+        return inputs, batch_loss
 
     def train_feat_net(self,
                        train_dataset,
@@ -196,6 +221,8 @@ class StyleTrainer(BaseTrainer):
             metric: -np.inf
             for metric in self.feat_metrics
         }
+
+        logger_metrics = {metric: [] for metric in metrics_epoch.keys()}
 
         best_value = metrics_final[self.feat_metric_to_maximize]
         best_net = copy.deepcopy(self.feat_net)
@@ -241,6 +268,9 @@ class StyleTrainer(BaseTrainer):
                 metrics_epoch = self.validate_feat(validation_dataset,
                                                    batch_size,
                                                    adversarial=False)
+                for metric in metrics_epoch.keys():
+                    logger_metrics[metric].append(metrics_epoch[metric])
+
                 metrics_train_epoch = self.validate_feat(train_dataset,
                                                          batch_size,
                                                          adversarial=False)
@@ -263,5 +293,11 @@ class StyleTrainer(BaseTrainer):
 
             if counter_patience > self.patience:
                 break
+
+        for metric in logger_metrics.keys():
+            plt.figure()
+            plt.title(metric)
+            plt.plot(logger_metrics[metric])
+        plt.show()
 
         return best_net, metrics_final

@@ -3,11 +3,10 @@ from harmonisation.functions import metrics
 from dipy.io.image import load_nifti
 
 import torch
-import torch.nn as nn
 import numpy as np
 
 path = "./data/"
-mean, std = np.load("./.saved_models/style/" + 'mean_std.npy')
+mean, std = np.load("./.saved_models/style_fa/" + 'mean_std.npy')
 
 mask, affine = load_nifti(path + "mask.nii.gz")
 sh_true, _ = load_nifti(path + "sh_true.nii.gz")
@@ -15,9 +14,6 @@ sh_pred, _ = load_nifti(path + "sh_pred.nii.gz")
 
 sh_true = torch.FloatTensor((sh_true - mean) / std)
 sh_pred = torch.FloatTensor((sh_pred - mean) / std)
-
-norm_true = sh_true[None].permute((0, 4, 1, 2, 3))
-norm_true = nn.InstanceNorm3d(15)(norm_true).permute((0, 2, 3, 4, 1))[0]
 
 acc = metrics.torch_angular_corr_coeff(sh_true, sh_pred)
 acc = (acc.numpy() * mask.squeeze()).sum() / mask.sum()

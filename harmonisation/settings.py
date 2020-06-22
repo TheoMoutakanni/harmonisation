@@ -3,7 +3,7 @@ ADNI_PATH = '/home/theo/Documents/Data/ADNI/'
 SIMON_PATH = '/media/theo/285EDDF95EDDC02C/Users/Public/Documents/SIMON/CCNA/'
 
 SIGNAL_PARAMETERS = {
-    'patch_size': [32, 32, 32],
+    'patch_size': [48, 48, 48],
     'sh_order': 4,
     'overlap_coeff': 2,
     'processing_params': {

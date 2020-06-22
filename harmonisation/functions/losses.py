@@ -159,25 +159,104 @@ def gram_matrix(input):
     return G.div(shape)
 
 
-class StyleLoss(nn.Module):
+class GramLoss(nn.Module):
+    """MSE of Gramm Matrices"""
+
     def __init__(self, target_features, layers_coeff=None):
         """target_features: dict {layer_name: layer_features}
         """
-        super(StyleLoss, self).__init__()
-        self.target_features = {name: gram_matrix(torch.FloatTensor(feature))
-                                for name, feature in target_features.items()}
+        super(GramLoss, self).__init__()
+        self.target_features = {name: nn.Parameter(
+            gram_matrix(torch.FloatTensor(feature)), requires_grad=False)
+            for name, feature in target_features.items()}
 
         if layers_coeff is None:
             layers_coeff = {name: 1. for name in self.target_features.keys()}
         self.layers_coeff = layers_coeff
 
-    def forward(self, input):
+    def forward(self, inputs):
         loss = 0
         for layer_name, target_G in self.target_features.items():
-            G = gram_matrix(input[layer_name])
-            target_G = target_G.to(G.device).expand_as(G)
+            G = gram_matrix(inputs[layer_name])
+            # target_G = target_G.to(G.device)
+            target_G = target_G.expand_as(G)
             loss += self.layers_coeff[layer_name] * F.mse_loss(G, target_G)
         loss /= float(len(self.target_features))
+        return loss.mean()
+
+
+class FeatureLoss(nn.Module):
+    """MSE of each feature vector"""
+
+    def __init__(self, target_features, layers_coeff=None):
+        """target_features: dict {layer_name: layer_features}
+        """
+        super(FeatureLoss, self).__init__()
+        self.target_features = {name: nn.Parameter(
+            torch.FloatTensor(feature).view(-1, feature.shape[1]).mean(0),
+            requires_grad=False)
+            for name, feature in target_features.items()}
+
+        if layers_coeff is None:
+            layers_coeff = {name: 1. for name in self.target_features.keys()}
+        self.layers_coeff = layers_coeff
+
+    def forward(self, inputs):
+        loss = 0
+        for layer_name, target_v in self.target_features.items():
+            v = inputs[layer_name]
+            # target_v = target_v.to(v.device)
+            target_v = target_v.expand_as(v)
+            loss += self.layers_coeff[layer_name] * F.mse_loss(v, target_v)
+        loss /= float(len(self.target_features))
+        return loss.mean()
+
+
+class SoftHistogram(nn.Module):
+    def __init__(self, bins, min, max, sigma):
+        super(SoftHistogram, self).__init__()
+        self.bins = bins
+        self.min = min
+        self.max = max
+        self.sigma = sigma
+        self.delta = float(max - min) / float(bins)
+        self.centers = float(min) + self.delta * \
+            (torch.arange(bins).float() + 0.5)
+        self.centers = nn.Parameter(self.centers, requires_grad=False)
+
+    def forward(self, x):
+        x = torch.unsqueeze(x, 1) - torch.unsqueeze(self.centers, 2)
+        x = torch.sigmoid(self.sigma * (x + self.delta / 2)) - \
+            torch.sigmoid(self.sigma * (x - self.delta / 2))
+        x = x.sum(dim=2)
+        return x
+
+
+class HistLoss(nn.Module):
+    """MSE of histogram"""
+
+    def __init__(self, data, bins, min, max, sigma=None):
+        """target_features: dict {layer_name: layer_features}
+        """
+        super(HistLoss, self).__init__()
+        self.target_hist, _ = np.histogram(data, bins=bins, range=[min, max])
+        self.target_hist = nn.Parameter(torch.FloatTensor(target_hist),
+                                        requires_grad=False)
+        self.bins = bins
+        self.max = max
+        self.min = min
+
+        if sigma is not None:
+            self.sigma = sigma
+        else:
+            self.sigma = 3 * np.std(data)
+
+        self.hist_fun = SoftHistogram(bins=bins, min=min, max=max, sigma=sigma)
+
+    def forward(self, inputs):
+        inputs = inputs.view(inputs.shape[0], -1)
+        hist = hist_fun(inputs)
+        loss = F.mse_loss(hist, self.target_hist.expand_as(hist))
         return loss.mean()
 
 
@@ -190,7 +269,9 @@ def get_loss_dict():
         'mse_RIS': loss_mse_RIS,
         'mse_ap': loss_mse_anisotropic_power,
 
-        'style': StyleLoss,
+        'gram': GramLoss,
+        'feature': FeatureLoss,
+        'hist': HistLoss,
 
         'bce': nn.BCELoss,
         'cross_entropy': nn.CrossEntropyLoss,
@@ -200,13 +281,11 @@ def get_loss_dict():
 
 def get_loss_fun(loss_specs):
     loss_dict = get_loss_dict()
-    losses_fun = [loss_dict[loss["type"]](**loss["parameters"])
-                  for loss in loss_specs]
-    losses_coeff = [loss['coeff'] for loss in loss_specs]
-
-    def loss(*args, **kwargs):
-        losses = torch.stack([coeff * fun(*args, **kwargs)
-                              for fun, coeff in zip(losses_fun, losses_coeff)],
-                             dim=0)
-        return losses.sum()
-    return loss
+    losses = []
+    for specs in loss_specs:
+        d = dict()
+        d['fun'] = loss_dict[specs["type"]](**specs["parameters"])
+        d['inputs'] = specs['inputs']
+        d['coeff'] = specs['coeff']
+        losses.append(d)
+    return losses

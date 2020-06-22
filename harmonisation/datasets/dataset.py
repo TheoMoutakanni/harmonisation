@@ -20,6 +20,8 @@ class SHDataset(torch.utils.data.Dataset):
                  normalize_data=True,
                  mean=None,
                  std=None,
+                 mean_b0=None,
+                 std_b0=None,
                  n_jobs=1,
                  cache_dir=None):
 
@@ -28,6 +30,8 @@ class SHDataset(torch.utils.data.Dataset):
         self.signal_parameters = signal_parameters
         self.mean = mean
         self.std = std
+        self.mean_b0 = mean_b0
+        self.std_b0 = std_b0
         self.patch_size = patch_size
 
         self._return_site = False
@@ -90,17 +94,18 @@ class SHDataset(torch.utils.data.Dataset):
 
         signal = torch.FloatTensor(signal)
         mask = torch.LongTensor(mask)
-        mean_b0 = torch.LongTensor(mean_b0)
+        mean_b0 = torch.FloatTensor(mean_b0)
 
         if self.transformations is not None:
             signal = self.transformations(signal)
 
         if not self._return_site:
-            return signal, mask, mean_b0
+            return {'sh': signal, 'mask': mask, 'mean_b0': mean_b0}
         else:
             site = self.data[patient_idx]['site']
             site = torch.LongTensor([site])
-            return signal, mask, mean_b0, site
+            return {'sh': signal, 'mask': mask,
+                    'mean_b0': mean_b0, 'site': site}
 
     def get_data_by_name(self, dmri_name):
         """Return a dict with params:
@@ -119,8 +124,17 @@ class SHDataset(torch.utils.data.Dataset):
                 [d['sh'].reshape(-1, d['sh'].shape[-1]).std(0)
                  for d in self.data]), 0)
 
+        if self.b0_mean is None or self.b0_std is None:
+            self.b0_mean = np.mean(np.stack(
+                [d['mean_b0'].reshape(-1, d['mean_b0'].shape[-1]).mean(0)
+                 for d in self.data]), 0)
+            self.b0_std = np.mean(np.stack(
+                [d['mean_b0'].reshape(-1, d['mean_b0'].shape[-1]).std(0)
+                 for d in self.data]), 0)
+
         for d in self.data:
             d['sh'] = (d['sh'] - self.mean) / self.std
+            d['mean_b0'] = (d['mean_b0'] - self.b0_mean) / self.b0_std
 
     def set_return_site(self, bool):
         self._return_site = bool

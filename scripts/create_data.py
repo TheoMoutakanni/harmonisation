@@ -13,7 +13,7 @@ from dipy.core.gradients import gradient_table
 import numpy as np
 
 
-save_folder = "./.saved_models/style_fa/"
+save_folder = "./.saved_models/style/"
 dwi_file = 'HAM_DTI_2018'  # '003_S_4288_S142486'
 net_file = '49_net.tar.gz'
 
@@ -37,6 +37,7 @@ dataset = SHDataset(paths,
 net, _ = ENet.load(save_folder + net_file)
 
 net = net.to("cuda")
+net.return_dict_layers = True
 net.eval()
 
 # Get the dmri name
@@ -50,15 +51,41 @@ sh_true = batch_to_xyz(
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'])
 sh_true = sh_true * dataset.std + dataset.mean
 
-sh_pred = net.predict_dataset(dataset, batch_size=16)[dwi_name]
+net_pred = net.predict_dataset(dataset, batch_size=16)[dwi_name]
+sh_pred = net_pred['sh_pred']
+mean_b0_pred = net_pred['mean_b0_pred']
+alpha = net_pred['alpha']
+beta = net_pred['beta']
 
 sh_pred = batch_to_xyz(
     sh_pred,
     data['real_size'],
     empty=data['empty'],
-    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],)
-    #remove_border=2)
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
+    remove_border=1)
 sh_pred = sh_pred * dataset.std + dataset.mean
+
+mean_b0_pred = batch_to_xyz(
+    mean_b0_pred,
+    data['real_size'],
+    empty=data['empty'],
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
+    remove_border=1)
+mean_b0_pred = mean_b0_pred * dataset.std_b0 + dataset.mean_b0
+
+alpha = batch_to_xyz(
+    alpha,
+    data['real_size'],
+    empty=data['empty'],
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
+    remove_border=1)
+
+beta = batch_to_xyz(
+    beta,
+    data['real_size'],
+    empty=data['empty'],
+    overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
+    remove_border=1)
 
 mask = batch_to_xyz(
     data['mask'],
@@ -80,24 +107,30 @@ patch_size = np.array(SIGNAL_PARAMETERS['patch_size'])
 pad_needed = patch_size - dwi_true.shape[:3] % patch_size
 pad_needed = [(x // 2, x // 2 + x % 2) for x in pad_needed]
 
-dwi_pred = dwi_pred[pad_needed[0][0]:-pad_needed[0][1],
-                    pad_needed[1][0]:-pad_needed[1][1],
-                    pad_needed[2][0]:-pad_needed[2][1]]
-sh_pred = sh_pred[pad_needed[0][0]:-pad_needed[0][1],
-                  pad_needed[1][0]:-pad_needed[1][1],
-                  pad_needed[2][0]:-pad_needed[2][1]]
-sh_true = sh_true[pad_needed[0][0]:-pad_needed[0][1],
-                  pad_needed[1][0]:-pad_needed[1][1],
-                  pad_needed[2][0]:-pad_needed[2][1]]
-mask = mask[pad_needed[0][0]:-pad_needed[0][1],
-            pad_needed[1][0]:-pad_needed[1][1],
-            pad_needed[2][0]:-pad_needed[2][1]]
 
-dwi_pred *= np.expand_dims(mean_b0, axis=-1)
+def pad(x, pad_needed):
+    return x[pad_needed[0][0]:-pad_needed[0][1],
+             pad_needed[1][0]:-pad_needed[1][1],
+             pad_needed[2][0]:-pad_needed[2][1]]
+
+
+dwi_pred = pad(dwi_pred, pad_needed)
+sh_pred = pad(sh_pred, pad_needed)
+alpha = pad(alpha, pad_needed)
+beta = pad(beta, pad_needed)
+mean_b0_pred = pad(mean_b0_pred, pad_needed)
+sh_true = pad(sh_true, pad_needed)
+mask = pad(mask, pad_needed)
+
+dwi_pred *= mean_b0_pred  # np.expand_dims(mean_b0, axis=-1)
 temp = np.zeros_like(dwi_true)
 temp[..., ~gtab.b0s_mask] = dwi_pred
-temp[..., gtab.b0s_mask] = b0
+temp[..., gtab.b0s_mask] = np.repeat(mean_b0_pred, b0.shape[-1], axis=-1)  # b0
 dwi_pred = temp  # np.concatenate([b0, dwi_pred], axis=-1)
+
+dwi_pred *= mask
+alpha *= mask
+beta *= mask
 
 assert dwi_pred.shape == dwi_true.shape, (dwi_true.shape, dwi_pred.shape)
 
@@ -106,3 +139,5 @@ save_nifti("./data/sh_true.nii.gz", sh_true, affine)
 save_nifti("./data/dwi_true.nii.gz", dwi_true, affine)
 save_nifti("./data/sh_pred.nii.gz", sh_pred, affine)
 save_nifti("./data/dwi_pred.nii.gz", dwi_pred, affine)
+save_nifti("./data/alpha.nii.gz", alpha, affine)
+save_nifti("./data/beta.nii.gz", beta, affine)

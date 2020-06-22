@@ -11,7 +11,7 @@ import scipy.stats as stats
 
 from harmonisation.utils import get_paths_SIMON
 
-save_folder = "./.saved_models/style_3/"
+save_folder = "./.saved_models/style/"
 
 paths, sites = get_paths_SIMON()
 paths_fake, sites_fake = get_paths_SIMON(
@@ -89,7 +89,7 @@ for path in tqdm.tqdm(paths_fake):
         if '_mask' in metric:
             continue
         data[metric] = data[metric].reshape(-1)
-        if metric in ['fa', 'md', 'ad', 'rd']:
+        if metric in ['fa', 'md', 'ad', 'rd']:  # ['fa', 'md', 'ad', 'rd']:
             data[metric] = data[metric][df.loc[path['name']]['wm_mask'] != 0]
         elif metric in []:
             data[metric] = data[metric][df.loc[path['name']]['csf_mask'] != 0]
@@ -117,10 +117,10 @@ for path in tqdm.tqdm(paths_fake):
 # df = df[df['site'] != 0]
 
 data = df[(df['fake'] == 'False')].groupby('site')
-data = [[np.mean(x) for x in v['fa'].values] for k, v in data]
+data = [[np.mean(x) for x in v['ad'].values] for k, v in data]
 print('Real stats:', stats.f_oneway(*data))
 data = df[(df['fake'] == 'True')].groupby('site')
-data = [[np.mean(x) for x in v['fa'].values] for k, v in data]
+data = [[np.mean(x) for x in v['ad'].values] for k, v in data]
 print('Fake stats:', stats.f_oneway(*data))
 
 manufacturers = dict(sorted([(x['name'], x['site'])

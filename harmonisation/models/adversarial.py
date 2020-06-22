@@ -35,17 +35,17 @@ def conv_block_2_3d(in_dim, out_dim, activation, normalization):
 
 class AdversarialNet(BaseNet):
     def __init__(self, in_dim, out_dim, num_filters,
-                 nb_layers, embed_size, patch_size, gtab, sh_order, mean, std, return_dict_layers=False):
-        super(AdversarialNet,
-              self).__init__(in_dim=in_dim,
-                             out_dim=out_dim,
-                             num_filters=num_filters,
-                             nb_layers=nb_layers,
-                             embed_size=embed_size,
-                             patch_size=patch_size,
-                             # gtab=gtab,
-                             sh_order=sh_order,
-                             return_dict_layers=return_dict_layers)
+                 nb_layers, embed_size, patch_size, modules,
+                 return_dict_layers=False):
+        super(AdversarialNet, self).__init__(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            num_filters=num_filters,
+            nb_layers=nb_layers,
+            embed_size=embed_size,
+            patch_size=patch_size,
+            # modules=modules,
+            return_dict_layers=return_dict_layers)
 
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -55,11 +55,9 @@ class AdversarialNet(BaseNet):
         self.patch_size = np.array(patch_size)
         self.return_dict_layers = return_dict_layers
 
-        self.input_signals = ['sh', 'mean_b0']
+        self.inputs = ['sh', 'mean_b0', 'mask']
 
-        self.dwi_module = DWIModule(gtab=gtab, sh_order=sh_order,
-                                    mean=mean, std=std)
-        self.fa_module = FAModule(gtab=self.dwi_module.gtab)
+        self.modules = modules
 
         activation = nn.LeakyReLU(0.2, inplace=True)
         normalization = nn.BatchNorm3d
@@ -67,12 +65,12 @@ class AdversarialNet(BaseNet):
         classifier_feat = OrderedDict({})
         for i in range(self.nb_layers):
             classifier_feat['conv_feat_{}'.format(i)] = conv_block_2_3d(
-                self.num_filters * 2**(i - 1) if i > 0 else 1,  # self.in_dim,
+                self.num_filters * 2**(i - 1) if i > 0 else self.in_dim,
                 self.num_filters * 2**i,
                 activation,
                 normalization)
             classifier_feat['maxpool_{}'.format(i)] = max_pooling_3d()
-            classifier_feat['dropout_{}'.format(i)] = nn.Dropout3d(p=0.1)
+            classifier_feat['dropout_{}'.format(i)] = nn.Dropout3d(p=0.05)
 
         self.classifier_feat = nn.ModuleDict(classifier_feat)
 
@@ -84,19 +82,23 @@ class AdversarialNet(BaseNet):
                         np.prod(self.patch_size / (2**self.nb_layers))),
                     self.embed_size),
                 activation,
-                nn.BatchNorm1d(self.embed_size),
+                # nn.BatchNorm1d(self.embed_size),
                 # nn.Dropout3d(p=0.2),
             )}))
 
         self.classifier_out = nn.Linear(self.embed_size, self.out_dim)
 
-    def forward(self, x, mean_b0):
-        x = self.dwi_module(x, mean_b0)
-        x = self.fa_module(x)
-
-        x = x.permute((0, 4, 1, 2, 3))
-
+    def forward(self, x, mean_b0, mask):
         out_feat = {}
+
+        dwi = self.modules['dwi'](x, mean_b0)
+        fa = self.modules['fa'](dwi, mask)
+
+        # out_feat['dwi'] = dwi
+        # out_feat['fa'] = fa
+
+        x = fa.permute((0, 4, 1, 2, 3))
+
         for name, layer in self.classifier_feat.items():
             x = layer(x)
             out_feat[name] = x
@@ -106,10 +108,13 @@ class AdversarialNet(BaseNet):
             out_feat[name] = x
 
         out = self.classifier_out(x)
-        out_feat['out'] = out
+
+        dict_layer = {'style_features': out_feat}
+
+        dict_layer['y_proba'] = out
 
         if self.return_dict_layers:
-            return out_feat
+            return dict_layer
         else:
             return out
 

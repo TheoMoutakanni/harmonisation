@@ -47,13 +47,14 @@ class BaseNet(nn.Module, object):
         return filename
 
     @classmethod
-    def load(cls, filename, use_device=torch.device('cpu')):
+    def load(cls, filename, use_device=torch.device('cpu'), *args, **kwargs):
         with tarfile.open(filename, "r") as tar:
             net_parameters = json.loads(
                 tar.extractfile("net_params.json").read().decode("utf-8"))
+            kwargs.update(net_parameters)
             path = tempfile.mkdtemp()
             tar.extract("state.torch", path=path)
-            net = cls(**net_parameters)
+            net = cls(*args, **kwargs)
             net.load_state_dict(
                 torch.load(
                     path + "/state.torch",
@@ -87,7 +88,7 @@ class BaseNet(nn.Module, object):
 
     def concatenate(self, obj):
         if isinstance(obj[0], dict):
-            return {k: np.concatenate([d[k] for d in obj])
+            return {k: self.concatenate([d[k] for d in obj])
                     for k in obj[0].keys()}
         else:
             return np.concatenate(obj)
@@ -106,7 +107,7 @@ class BaseNet(nn.Module, object):
             for dmri_name in names:
                 data = dataset.get_data_by_name(dmri_name)
                 signals = [data[signal_name]
-                           for signal_name in self.input_signals]
+                           for signal_name in self.inputs]
 
                 results[dmri_name] = []
                 nb_input = signals[0].shape[0]

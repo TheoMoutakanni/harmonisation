@@ -34,7 +34,7 @@ class BaseTrainer():
         self.net = net
         self.metric_to_maximize = metric_to_maximize
         self.metrics = metrics
-        self.loss = get_loss_fun(loss_specs)
+        self.losses = get_loss_fun(loss_specs)
         self.optimizer = optim.Adam(
             self.net.parameters(), **optimizer_parameters)
 
@@ -56,14 +56,15 @@ class BaseTrainer():
             dic = dict()
             for metric in self.metrics:
                 metric_calc = []
-                nb_batches = int(np.ceil(len(data_pred[name]) / batch_size))
+                nb_batches = int(
+                    np.ceil(len(data_pred[name]['sh_pred']) / batch_size))
                 for batch in range(nb_batches):
                     idx = range(batch * batch_size,
                                 min((batch + 1) * batch_size,
-                                    len(data_pred[name])))
+                                    len(data_pred[name]['sh_pred'])))
                     metric_calc.append(metrics_fun[metric](
                         torch.FloatTensor(data_true[name]['sh'][idx]),
-                        torch.FloatTensor(data_pred[name][idx]),
+                        torch.FloatTensor(data_pred[name]['sh_pred'][idx]),
                         torch.LongTensor(data_true[name]['mask'][idx])
                     ))
                 dic[metric] = metrics.nanmean(torch.cat(metric_calc)).numpy()
@@ -143,21 +144,42 @@ class BaseTrainer():
         print_RIS(metrics.torch_RIS(sh_true), metrics.torch_RIS(sh_pred), mask)
         print_diff(sh_true, sh_pred, mask, 'mse', normalize=False)
 
-    def get_batch_loss(self, data):
+    def compute_modules(self, inputs_needed, inputs):
+        if 'dwi' in inputs_needed and 'dwi' not in inputs.keys():
+            inputs['dwi'] = self.modules['dwi'](inputs['sh'],
+                                                inputs['mean_b0'])
+        if 'dwi_pred' in inputs_needed and 'dwi_pred' not in inputs.keys():
+            inputs['dwi_pred'] = self.modules['dwi'](inputs['sh_pred'],
+                                                     inputs['mean_b0_pred'])
+        if 'fa' in inputs_needed and 'fa' not in inputs.keys():
+            inputs['fa'] = self.modules['fa'](inputs['dwi'], inputs['mask'])
+        if 'fa_pred' in inputs_needed and 'fa_pred' not in inputs.keys():
+            inputs['fa_pred'] = self.modules['fa'](inputs['dwi_pred'],
+                                                   inputs['mask'])
+
+        return inputs
+
+    def get_batch_loss(self, inputs):
         """ Single forward and backward pass """
 
-        X, mask, mean_b0 = data
-        X = X.to(self.net.device)
+        for input_name in inputs.keys():
+            inputs[input_name] = inputs[input_name].to(self.net.device)
 
-        Z = self.net(X)
+        net_pred = self.net(inputs['sh'], inputs['mean_b0'])
+        inputs.update(net_pred)
 
-        X = X.to(self.net.device)
-        mask = mask.to(self.net.device)
-        Z = self.net.forward(X)
+        inputs_needed = [inp for loss in self.losses for inp in loss['inputs']]
+        inputs = self.compute_modules(inputs_needed, inputs)
 
-        batch_loss = self.loss(X, Z, mask)
+        batch_loss = []
+        for loss_d in self.losses:
+            loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
+            loss = loss_d['coeff'] * loss
+            batch_loss.append(loss)
 
-        return batch_loss
+        batch_loss = torch.stack(batch_loss, dim=0).sum()
+
+        return inputs, batch_loss
 
     def train(self,
               train_dataset,
@@ -219,7 +241,7 @@ class BaseTrainer():
                 # Set network to train mode
                 self.net.train()
 
-                batch_loss = self.get_batch_loss(data)
+                _, batch_loss = self.get_batch_loss(data)
 
                 epoch_loss_train += batch_loss.item()
 

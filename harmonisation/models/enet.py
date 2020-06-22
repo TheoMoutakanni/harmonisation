@@ -504,11 +504,12 @@ class ENet(BaseNet):
                          decoder_relu=decoder_relu,
                          return_dict_layers=return_dict_layers)
 
-        self.input_signals = ['sh']
+        self.inputs = ['sh', 'mean_b0']
 
         self.return_dict_layers = return_dict_layers
 
         self.ncoef = int((sh_order + 2) * (sh_order + 1) / 2)
+        self.ncoef += 1
 
         self.norm_beforedown_0 = nn.InstanceNorm3d(self.ncoef, affine=True)
 
@@ -694,8 +695,10 @@ class ENet(BaseNet):
                 bias=True),
             nn.Upsample(scale_factor=16, mode='trilinear'))
 
-    def forward(self, x):
+    def forward(self, sh, mean_b0):
         # Initial block
+
+        x = torch.cat([mean_b0, sh], dim=-1)
 
         x = x.permute((0, 4, 1, 2, 3))
 
@@ -782,24 +785,28 @@ class ENet(BaseNet):
 
         if self.return_dict_layers:
             x_feat['beta'] = beta.permute((0, 2, 3, 4, 1))
-            x_feat['beta_1'] = beta_1.permute((0, 2, 3, 4, 1))
-            x_feat['beta_2'] = beta_2.permute((0, 2, 3, 4, 1))
-            x_feat['beta_3'] = beta_3.permute((0, 2, 3, 4, 1))
-            x_feat['beta_4'] = beta_4.permute((0, 2, 3, 4, 1))
+            # x_feat['beta_1'] = beta_1.permute((0, 2, 3, 4, 1))
+            # x_feat['beta_2'] = beta_2.permute((0, 2, 3, 4, 1))
+            # x_feat['beta_3'] = beta_3.permute((0, 2, 3, 4, 1))
+            # x_feat['beta_4'] = beta_4.permute((0, 2, 3, 4, 1))
             x_feat['alpha'] = alpha.permute((0, 2, 3, 4, 1))
-            x_feat['alpha_1'] = alpha_1.permute((0, 2, 3, 4, 1))
-            x_feat['alpha_2'] = alpha_2.permute((0, 2, 3, 4, 1))
-            x_feat['alpha_3'] = alpha_3.permute((0, 2, 3, 4, 1))
-            x_feat['alpha_4'] = alpha_4.permute((0, 2, 3, 4, 1))
+            # x_feat['alpha_1'] = alpha_1.permute((0, 2, 3, 4, 1))
+            # x_feat['alpha_2'] = alpha_2.permute((0, 2, 3, 4, 1))
+            # x_feat['alpha_3'] = alpha_3.permute((0, 2, 3, 4, 1))
+            # x_feat['alpha_4'] = alpha_4.permute((0, 2, 3, 4, 1))
 
         x = x_beforedown_0 * (1 + alpha) + beta
 
         x = x.permute((0, 2, 3, 4, 1))
 
+        sh_pred = x[..., 1:]
+        mean_b0_pred = x[..., :1]
+
         if self.return_dict_layers:
-            x_feat['out'] = x
+            x_feat['sh_pred'] = sh_pred
+            x_feat['mean_b0_pred'] = mean_b0_pred
 
         if self.return_dict_layers:
             return x_feat
         else:
-            return x
+            return {'sh_pred': sh_pred, 'mean_b0_pred': mean_b0_pred}
