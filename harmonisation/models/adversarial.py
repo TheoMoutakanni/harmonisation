@@ -109,7 +109,7 @@ class AdversarialNet(BaseNet):
 
         out = self.classifier_out(x)
 
-        dict_layer = {'style_features': out_feat}
+        dict_layer = out_feat
 
         dict_layer['y_proba'] = out
 

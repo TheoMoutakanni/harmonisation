@@ -185,8 +185,8 @@ style_trainer.feat_net = feat_net
 
 validation_features = style_trainer.feat_net.predict_dataset(
     validation_dataset)
-validation_features = {k: v['style_features']
-                       for k, v in validation_features.items()}
+# validation_features = {k: v['style_features']
+#                        for k, v in validation_features.items()}
 
 
 def flatten_dict(dic):
@@ -197,20 +197,32 @@ def flatten_dict(dic):
 validation_features = flatten_dict(validation_features)
 
 # target_layers = [name for name in validation_features.keys() if "feat" in name]
-target_layers = ['dense_feat_1',
-                 'conv_feat_2', 'conv_feat_3']
+target_layers = ['dense_feat_1', 'conv_feat_2', 'conv_feat_3']
 
 target_features = {layer: np.mean(validation_features[layer], axis=0)[None]
                    for layer in target_layers}
-layers_coeff = {name: 1. for name in target_layers}
+layers_coeff = {name: 1 / len(target_layers) for name in target_layers}
 print(target_layers)
-style_trainer.set_style_loss([
+
+style_losses = [
     {"type": "gram",
-     "inputs": ["style_features"],
-     "parameters": {"target_features": target_features,
-                    "layers_coeff": layers_coeff},
+     "inputs": [layer],
+     "parameters": {"target_features": target_features[layer],
+                    "layers_coeff": layers_coeff[layer]},
      "coeff": 1e5,
-     }])
+     }
+    for layer in target_layers]
+
+# style_losses += [
+#     {"type": "feature",
+#      "inputs": [layer],
+#      "parameters": {"target_features": target_features[layer],
+#                     "layers_coeff": layers_coeff[layer]},
+#      "coeff": 10.,
+#      }
+#     for layer in target_layers]
+
+style_trainer.set_style_loss(style_losses)
 
 net, metrics = style_trainer.train(train_dataset,
                                    validation_dataset,

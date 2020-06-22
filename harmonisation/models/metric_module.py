@@ -13,7 +13,7 @@ from torch_sym3eig import Sym3Eig
 class DWIModule(nn.Module):
     def __init__(self, gtab, sh_order,
                  mean=None, std=None,
-                 b0_mean=None, std_b0=None):
+                 b0_mean=None, b0_std=None):
         super(DWIModule, self).__init__()
 
         B, _ = get_B_matrix(gtab, sh_order)
@@ -63,12 +63,8 @@ class DWIModule(nn.Module):
 
     def forward(self, X, mean_b0):
         if self.mean is not None and self.std is not None:
-            # self.mean = self.mean.to(X.device)
-            # self.std = self.std.to(X.device)
             X = X * self.std + self.mean
         if self.b0_mean is not None and self.b0_std is not None:
-            # self.b0_mean = self.b0_mean.to(X.device)
-            # self.b0_std = self.b0_std.to(X.device)
             mean_b0 = mean_b0 * self.b0_std + self.b0_mean
 
         self.B = self.B.to(X.device)

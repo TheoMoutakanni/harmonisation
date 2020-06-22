@@ -24,19 +24,22 @@ def weighted_mean(v, weight):
     return loss[torch.isnan(loss)]
 
 
-def loss_acc():
-    def loss(X, Z, mask):
+class AccLoss(nn.Module):
+    def __init__(self):
+        super(AccLoss, self).__init__()
+
+    def forward(self, X, Z, mask):
         acc = torch_angular_corr_coeff(X + 1e-8, Z + 1e-8)
         acc = 1 - weighted_mean(acc, mask.squeeze()).mean()
         return acc
-    return loss
 
 
-def loss_mse():
-    def loss(X, Z, mask):
-        mse = weighted_mse(X, Z, mask)
-        return mse
-    return loss
+class WeightedMSELoss(nn.Module):
+    def __init__(self):
+        super(WeightedMSELoss, self).__init__()
+
+    def forward(self, X, Z, mask):
+        return weighted_mse(X, Z, mask)
 
 
 class DWIMSELoss(nn.Module):
@@ -81,35 +84,28 @@ class DWIMSELoss(nn.Module):
         return mse
 
 
-def loss_acc_mse(alpha=0.5):
-    def loss(X, Z, mask):
-        acc = torch_angular_corr_coeff(X + 1e-8, Z + 1e-8)
-        acc = 1 - weighted_mean(acc, mask.squeeze()).mean()
-        mse = weighted_mse(X, Z, mask)
-        loss = alpha * acc + mse
-        return loss
-    return loss
+class GFAMSELoss(nn.Module):
+    def __init__(self):
+        super(GFAMSELoss, self).__init__()
+
+    def forward(self, X, Z, mask):
+        return torch_mse_gfa(X, Z, mask).mean()
 
 
-def loss_mse_gfa():
-    def loss(X, Z, mask):
-        mse_gfa = torch_mse_gfa(X, Z, mask).mean()
-        return mse_gfa
-    return loss
+class APMSELoss(nn.Module):
+    def __init__(self):
+        super(APMSELoss, self).__init__()
+
+    def forward(self, X, Z, mask):
+        return torch_mse_anisotropic_power(X, Z, mask).mean()
 
 
-def loss_mse_anisotropic_power():
-    def loss(X, Z, mask):
-        mse_gfa = torch_mse_anisotropic_power(X, Z, mask).mean()
-        return mse_gfa
-    return loss
+class RISMSELoss(nn.Module):
+    def __init__(self):
+        super(RISMSELoss, self).__init__()
 
-
-def loss_mse_RIS():
-    def loss(X, Z, mask):
-        mse_RIS = torch_mse_RIS(X, Z, mask).mean()
-        return mse_RIS
-    return loss
+    def forward(self, X, Z, mask):
+        return torch_mse_RIS(X, Z, mask).mean()
 
 
 class FocalLoss(nn.Module):
@@ -166,22 +162,14 @@ class GramLoss(nn.Module):
         """target_features: dict {layer_name: layer_features}
         """
         super(GramLoss, self).__init__()
-        self.target_features = {name: nn.Parameter(
-            gram_matrix(torch.FloatTensor(feature)), requires_grad=False)
-            for name, feature in target_features.items()}
-
-        if layers_coeff is None:
-            layers_coeff = {name: 1. for name in self.target_features.keys()}
-        self.layers_coeff = layers_coeff
+        self.target_G = nn.Parameter(
+            gram_matrix(torch.FloatTensor(target_features)),
+            requires_grad=False)
+        self.layers_coeff = layers_coeff if layers_coeff is not None else 1.
 
     def forward(self, inputs):
-        loss = 0
-        for layer_name, target_G in self.target_features.items():
-            G = gram_matrix(inputs[layer_name])
-            # target_G = target_G.to(G.device)
-            target_G = target_G.expand_as(G)
-            loss += self.layers_coeff[layer_name] * F.mse_loss(G, target_G)
-        loss /= float(len(self.target_features))
+        G = gram_matrix(inputs)
+        loss = self.layers_coeff * F.mse_loss(G, self.target_G.expand_as(G))
         return loss.mean()
 
 
@@ -192,23 +180,15 @@ class FeatureLoss(nn.Module):
         """target_features: dict {layer_name: layer_features}
         """
         super(FeatureLoss, self).__init__()
-        self.target_features = {name: nn.Parameter(
-            torch.FloatTensor(feature).view(-1, feature.shape[1]).mean(0),
+        self.target_features = nn.Parameter(
+            torch.FloatTensor(target_features).mean(0),
             requires_grad=False)
-            for name, feature in target_features.items()}
 
-        if layers_coeff is None:
-            layers_coeff = {name: 1. for name in self.target_features.keys()}
-        self.layers_coeff = layers_coeff
+        self.layers_coeff = layers_coeff if layers_coeff is not None else 1.
 
     def forward(self, inputs):
-        loss = 0
-        for layer_name, target_v in self.target_features.items():
-            v = inputs[layer_name]
-            # target_v = target_v.to(v.device)
-            target_v = target_v.expand_as(v)
-            loss += self.layers_coeff[layer_name] * F.mse_loss(v, target_v)
-        loss /= float(len(self.target_features))
+        loss = self.layers_coeff * \
+            F.mse_loss(inputs, self.target_features.expand_as(inputs))
         return loss.mean()
 
 
@@ -262,12 +242,12 @@ class HistLoss(nn.Module):
 
 def get_loss_dict():
     return {
-        'acc': loss_acc,
-        'mse': loss_mse,
+        'acc': AccLoss,
+        'mse': WeightedMSELoss,
         'dwi_mse': DWIMSELoss,
-        'mse_gfa': loss_acc_mse,
-        'mse_RIS': loss_mse_RIS,
-        'mse_ap': loss_mse_anisotropic_power,
+        'mse_RIS': RISMSELoss,
+        'mse_ap': APMSELoss,
+        'mse_gfa': GFAMSELoss,
 
         'gram': GramLoss,
         'feature': FeatureLoss,
@@ -279,13 +259,14 @@ def get_loss_dict():
     }
 
 
-def get_loss_fun(loss_specs):
+def get_loss_fun(loss_specs, device):
     loss_dict = get_loss_dict()
     losses = []
     for specs in loss_specs:
         d = dict()
-        d['fun'] = loss_dict[specs["type"]](**specs["parameters"])
+        d['fun'] = loss_dict[specs["type"]](**specs["parameters"]).to(device)
         d['inputs'] = specs['inputs']
         d['coeff'] = specs['coeff']
+        d['type'] = specs['type']
         losses.append(d)
     return losses

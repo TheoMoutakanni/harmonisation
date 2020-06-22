@@ -63,14 +63,15 @@ class StyleTrainer(BaseTrainer):
 
         self.metric_to_maximize = metric_to_maximize["autoencoder"]
         self.metrics = metrics["autoencoder"]
-        self.losses = get_loss_fun(loss_specs["autoencoder"])
-        self.style_losses = get_loss_fun(loss_specs["style"])
+        self.losses = get_loss_fun(loss_specs["autoencoder"], self.net.device)
+        self.style_losses = get_loss_fun(loss_specs["style"], self.net.device)
         self.optimizer = optim.Adam(
             self.net.parameters(), **optimizer_parameters["autoencoder"])
 
         self.feat_metric_to_maximize = metric_to_maximize["features"]
         self.feat_metrics = metrics["features"]
-        self.feat_losses = get_loss_fun(loss_specs["features"])
+        self.feat_losses = get_loss_fun(loss_specs["features"],
+                                        self.net.device)
         self.feat_optimizer = optim.Adam(
             self.feat_net.parameters(), **optimizer_parameters["features"])
 
@@ -80,7 +81,7 @@ class StyleTrainer(BaseTrainer):
         self.save_folder = save_folder
 
     def set_style_loss(self, loss_specs):
-        self.style_losses = get_loss_fun(loss_specs)
+        self.style_losses = get_loss_fun(loss_specs, self.net.device)
 
     def validate_feat(self, dataset, batch_size=128, adversarial=True):
         """
@@ -172,6 +173,7 @@ class StyleTrainer(BaseTrainer):
             loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
             loss = loss_d['coeff'] * loss
             batch_loss_reconst.append(loss)
+            # print(loss_d['type'], loss_d['inputs'][0], loss.detach().cpu().item())
         batch_loss_reconst = torch.stack(batch_loss_reconst, dim=0).sum()
 
         batch_loss_style = []
@@ -179,6 +181,7 @@ class StyleTrainer(BaseTrainer):
             loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
             loss = loss_d['coeff'] * loss
             batch_loss_style.append(loss)
+            # print(loss_d['type'], loss_d['inputs'][0], loss.detach().cpu().item())
         batch_loss_style = torch.stack(batch_loss_style, dim=0).sum()
 
         print(batch_loss_reconst, batch_loss_style)

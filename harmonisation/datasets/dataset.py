@@ -20,8 +20,8 @@ class SHDataset(torch.utils.data.Dataset):
                  normalize_data=True,
                  mean=None,
                  std=None,
-                 mean_b0=None,
-                 std_b0=None,
+                 b0_mean=None,
+                 b0_std=None,
                  n_jobs=1,
                  cache_dir=None):
 
@@ -30,8 +30,8 @@ class SHDataset(torch.utils.data.Dataset):
         self.signal_parameters = signal_parameters
         self.mean = mean
         self.std = std
-        self.mean_b0 = mean_b0
-        self.std_b0 = std_b0
+        self.b0_mean = b0_mean
+        self.b0_std = b0_std
         self.patch_size = patch_size
 
         self._return_site = False
