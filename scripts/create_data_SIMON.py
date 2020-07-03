@@ -15,14 +15,15 @@ import os
 import tqdm
 
 
-save_folder = "./.saved_models/style_fa/"
-net_file = '49_net.tar.gz'
+save_folder = "./.saved_models/style_test/"
+net_file = '47_net.tar.gz'
 
 SIGNAL_PARAMETERS['overlap_coeff'] = 2
 
 paths, _ = get_paths_SIMON()  # get_paths_ADNI()
 
-mean, std = np.load(save_folder + 'mean_std.npy')
+mean, std, b0_mean, b0_std = np.load(save_folder + 'mean_std.npy',
+                                     allow_pickle=True)
 
 # Load the network
 net, _ = ENet.load(save_folder + net_file)
@@ -56,6 +57,10 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
                         signal_parameters=SIGNAL_PARAMETERS,
                         transformations=None,
                         normalize_data=True,
+                        mean=mean,
+                        std=std,
+                        b0_mean=b0_mean,
+                        b0_std=b0_std,
                         n_jobs=8)
 
     data = dataset.get_data_by_name(dwi_name)
@@ -87,7 +92,7 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
         empty=data['empty'],
         overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
         remove_border=2)
-    mean_b0_pred = mean_b0_pred * dataset.std_b0 + dataset.mean_b0
+    mean_b0_pred = mean_b0_pred * dataset.b0_std + dataset.b0_mean
 
     alpha = batch_to_xyz(
         alpha,

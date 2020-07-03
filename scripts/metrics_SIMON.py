@@ -11,7 +11,7 @@ import scipy.stats as stats
 
 from harmonisation.utils import get_paths_SIMON
 
-save_folder = "./.saved_models/style/"
+save_folder = "./.saved_models/style_test/"
 
 paths, sites = get_paths_SIMON()
 paths_fake, sites_fake = get_paths_SIMON(
@@ -116,12 +116,13 @@ for path in tqdm.tqdm(paths_fake):
 
 # df = df[df['site'] != 0]
 
-data = df[(df['fake'] == 'False')].groupby('site')
-data = [[np.mean(x) for x in v['ad'].values] for k, v in data]
-print('Real stats:', stats.f_oneway(*data))
-data = df[(df['fake'] == 'True')].groupby('site')
-data = [[np.mean(x) for x in v['ad'].values] for k, v in data]
-print('Fake stats:', stats.f_oneway(*data))
+for metric in ['fa', 'md', 'ad', 'rd']:
+    data = df[(df['fake'] == 'False')].groupby('site')
+    data = [[np.mean(x) for x in v[metric].values] for k, v in data]
+    print('{} Real stats:'.format(metric), stats.f_oneway(*data))
+    data = df[(df['fake'] == 'True')].groupby('site')
+    data = [[np.mean(x) for x in v[metric].values] for k, v in data]
+    print('{} Fake stats:'.format(metric), stats.f_oneway(*data))
 
 manufacturers = dict(sorted([(x['name'], x['site'])
                              for x in paths], key=lambda x: x[1]))

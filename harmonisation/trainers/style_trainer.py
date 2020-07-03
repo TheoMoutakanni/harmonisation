@@ -1,6 +1,7 @@
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 
 import numpy as np
 import copy
@@ -79,6 +80,8 @@ class StyleTrainer(BaseTrainer):
 
         self.patience = patience
         self.save_folder = save_folder
+        self.writer_path = self.save_folder + '/data/'
+        self.writer = SummaryWriter(logdir=self.writer_path)
 
     def set_style_loss(self, loss_specs):
         self.style_losses = get_loss_fun(loss_specs, self.net.device)
@@ -128,30 +131,36 @@ class StyleTrainer(BaseTrainer):
         batch_loss = 0
 
         if coeff_fake < 1:
-            feat_net_pred = self.feat_net.forward(inputs['sh'],
-                                                  inputs['mean_b0'],
-                                                  inputs['mask'])
-            batch_loss_real = self.feat_losses[0]['fun'](feat_net_pred['y_proba'],
-                                                         inputs['site'].squeeze(-1))
+            feat_net_pred = self.feat_net.forward(
+                inputs['sh'],
+                inputs['mean_b0'],
+                inputs['mask'])
+            batch_loss_real = self.feat_losses[0]['fun'](
+                feat_net_pred['y_proba'],
+                inputs['site'].squeeze(-1))
 
             batch_loss += (1 - coeff_fake) * batch_loss_real
 
         if coeff_fake > 0:
             if 'sh_pred' not in inputs.keys():
                 inputs.update(self.net(inputs['sh'], inputs['mean_b0']))
-            feat_net_pred = self.feat_net.forward(inputs['sh_pred'].detach(),
-                                                  inputs['mean_b0_pred'].detach(),
-                                                  inputs['mask'])
-            batch_loss_fake = self.feat_losses[0]['fun'](feat_net_pred['y_proba'],
-                                                         inputs['site'].squeeze(-1))
+            feat_net_pred = self.feat_net.forward(
+                inputs['sh_pred'].detach(),
+                inputs['mean_b0_pred'].detach(),
+                inputs['mask'])
+            batch_loss_fake = self.feat_losses[0]['fun'](
+                feat_net_pred['y_proba'],
+                inputs['site'].squeeze(-1))
 
             batch_loss += coeff_fake * batch_loss_fake
 
-        return inputs, batch_loss
+        return inputs, {'batch_loss': batch_loss}
 
     def get_batch_loss(self, inputs):
         """ Get the loss + adversarial loss for the autoencoder
         Single forward and backward pass """
+
+        loss_dict = {}
 
         for input_name in inputs.keys():
             inputs[input_name] = inputs[input_name].to(self.net.device)
@@ -173,7 +182,7 @@ class StyleTrainer(BaseTrainer):
             loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
             loss = loss_d['coeff'] * loss
             batch_loss_reconst.append(loss)
-            # print(loss_d['type'], loss_d['inputs'][0], loss.detach().cpu().item())
+            loss_dict[loss_d['type'] + '_' + loss_d['inputs'][0]] = loss
         batch_loss_reconst = torch.stack(batch_loss_reconst, dim=0).sum()
 
         batch_loss_style = []
@@ -181,14 +190,16 @@ class StyleTrainer(BaseTrainer):
             loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
             loss = loss_d['coeff'] * loss
             batch_loss_style.append(loss)
-            # print(loss_d['type'], loss_d['inputs'][0], loss.detach().cpu().item())
+            loss_dict[loss_d['type'] + '_' + loss_d['inputs'][0]] = loss
         batch_loss_style = torch.stack(batch_loss_style, dim=0).sum()
-
-        print(batch_loss_reconst, batch_loss_style)
 
         batch_loss = batch_loss_reconst + batch_loss_style
 
-        return inputs, batch_loss
+        loss_dict.update({'batch_loss': batch_loss,
+                          'reconst_loss': batch_loss_reconst,
+                          'style_loss': batch_loss_style})
+
+        return inputs, loss_dict
 
     def train_feat_net(self,
                        train_dataset,
@@ -237,13 +248,13 @@ class StyleTrainer(BaseTrainer):
             if epoch != 0:
                 t.set_postfix(
                     best_metric=best_value,
-                    loss=epoch_loss_train,
+                    loss=epoch_loss_train['batch_loss'],
                     last_update=last_update,
                     metrics_val=metrics_epoch,
                     metrics_train=metrics_train_epoch,
                 )
 
-            epoch_loss_train = 0.0
+            epoch_loss_train = {}
 
             for i, data in enumerate(dataloader_train, 0):
 
@@ -252,20 +263,25 @@ class StyleTrainer(BaseTrainer):
                 # Set network to train mode
                 self.feat_net.train()
 
-                _, batch_loss = self.get_batch_feat_loss(
+                _, batch_losses = self.get_batch_feat_loss(
                     data, coeff_fake=coeff_fake)
 
-                epoch_loss_train += batch_loss.item()
-
-                loss = batch_loss
+                loss = batch_losses['batch_loss']
                 loss.backward()
+
+                for name, loss in batch_losses.items():
+                    loss = epoch_loss_train.setdefault(name, 0) + loss.item()
+                    epoch_loss_train[name] = loss
 
                 # self.net.plot_grad_flow()
 
                 # gradient descent
                 self.feat_optimizer.step()
 
-            epoch_loss_train /= (i + 1)
+            for name, loss in epoch_loss_train.items():
+                self.writer.add_scalar('feat_loss/' + name,
+                                       loss / (i + 1), epoch)
+                epoch_loss_train[name] = loss / (i + 1)
 
             with torch.no_grad():
                 metrics_epoch = self.validate_feat(validation_dataset,
@@ -277,6 +293,13 @@ class StyleTrainer(BaseTrainer):
                 metrics_train_epoch = self.validate_feat(train_dataset,
                                                          batch_size,
                                                          adversarial=False)
+
+            for name, metric in metrics_epoch.items():
+                self.writer.add_scalar('feat_metric/' + name + '_val',
+                                       metric, epoch)
+            for name, metric in metrics_train_epoch.items():
+                self.writer.add_scalar('feat_metric/' + name + '_train',
+                                       metric, epoch)
 
             if self.save_folder:
                 file_name = self.save_folder + str(epoch) + "_featnet.tar.gz"
@@ -297,10 +320,10 @@ class StyleTrainer(BaseTrainer):
             if counter_patience > self.patience:
                 break
 
-        for metric in logger_metrics.keys():
-            plt.figure()
-            plt.title(metric)
-            plt.plot(logger_metrics[metric])
-        plt.show()
+        # for metric in logger_metrics.keys():
+        #     plt.figure()
+        #     plt.title(metric)
+        #     plt.plot(logger_metrics[metric])
+        # plt.show()
 
         return best_net, metrics_final

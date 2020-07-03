@@ -215,16 +215,20 @@ class SoftHistogram(nn.Module):
 class HistLoss(nn.Module):
     """MSE of histogram"""
 
-    def __init__(self, data, bins, min, max, sigma=None):
+    def __init__(self, data, bins, min, max, scale=1., sigma=None):
         """target_features: dict {layer_name: layer_features}
         """
         super(HistLoss, self).__init__()
-        self.target_hist, _ = np.histogram(data, bins=bins, range=[min, max])
+        data *= scale
+        self.target_hist, _ = np.histogram(data,
+                                           bins=bins,
+                                           range=[min * scale, max * scale])
         self.target_hist = nn.Parameter(torch.FloatTensor(target_hist),
                                         requires_grad=False)
         self.bins = bins
-        self.max = max
-        self.min = min
+        self.max = max * scale
+        self.min = min * scale
+        self.scale = scale
 
         if sigma is not None:
             self.sigma = sigma
@@ -235,6 +239,7 @@ class HistLoss(nn.Module):
 
     def forward(self, inputs):
         inputs = inputs.view(inputs.shape[0], -1)
+        inputs *= self.scale
         hist = hist_fun(inputs)
         loss = F.mse_loss(hist, self.target_hist.expand_as(hist))
         return loss.mean()

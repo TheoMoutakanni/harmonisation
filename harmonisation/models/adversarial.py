@@ -95,7 +95,7 @@ class AdversarialNet(BaseNet):
         fa = self.modules['fa'](dwi, mask)
 
         # out_feat['dwi'] = dwi
-        # out_feat['fa'] = fa
+        out_feat['fa'] = fa
 
         x = fa.permute((0, 4, 1, 2, 3))
 

@@ -1,6 +1,7 @@
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 
 import numpy as np
 import copy
@@ -40,6 +41,8 @@ class BaseTrainer():
 
         self.patience = patience
         self.save_folder = save_folder
+        self.writer_path = self.save_folder + '/data/'
+        self.writer = SummaryWriter(logdir=self.writer_path)
 
     def validate(self, validation_dataset, batch_size=128):
         """
@@ -179,7 +182,7 @@ class BaseTrainer():
 
         batch_loss = torch.stack(batch_loss, dim=0).sum()
 
-        return inputs, batch_loss
+        return inputs, {'batch_loss': batch_loss}
 
     def train(self,
               train_dataset,
@@ -225,12 +228,12 @@ class BaseTrainer():
                     best_metric=best_value,
                     metric_epoch=metrics_epoch,
                     last_update=last_update,
-                    loss=epoch_loss_train,
+                    loss=epoch_loss_train['batch_loss'],
                 )
 
             # Training
 
-            epoch_loss_train = 0.0
+            epoch_loss_train = {}
 
             for i, data in tqdm(enumerate(dataloader_train, 0),
                                 total=len(train_dataset) // batch_size +
@@ -241,19 +244,24 @@ class BaseTrainer():
                 # Set network to train mode
                 self.net.train()
 
-                _, batch_loss = self.get_batch_loss(data)
+                _, batch_losses = self.get_batch_loss(data)
 
-                epoch_loss_train += batch_loss.item()
-
-                loss = batch_loss
+                loss = batch_losses['batch_loss']
                 loss.backward()
+
+                for name, loss in batch_losses.items():
+                    loss = epoch_loss_train.setdefault(name, 0) + loss.item()
+                    epoch_loss_train[name] = loss
 
                 # self.net.plot_grad_flow()
 
                 # gradient descent
                 self.optimizer.step()
 
-            epoch_loss_train /= (i + 1)
+            for name, loss in epoch_loss_train.items():
+                self.writer.add_scalar('loss/' + name,
+                                       loss / (i + 1), epoch)
+                epoch_loss_train[name] = loss / (i + 1)
 
             # Validation and print
             with torch.no_grad():
@@ -265,6 +273,10 @@ class BaseTrainer():
 
                 if epoch % freq_print == 0 and epoch != 0:
                     self.print_metrics(validation_dataset, batch_size)
+
+            for name, metric in metrics_epoch.items():
+                self.writer.add_scalar('metric/' + name + '_val',
+                                       metric, epoch)
 
             if self.save_folder:
                 self.net.save(self.save_folder + str(epoch) + "_net.tar.gz")
@@ -284,10 +296,10 @@ class BaseTrainer():
             if counter_patience > self.patience:
                 break
 
-        for metric in logger_metrics.keys():
-            plt.figure()
-            plt.title(metric)
-            plt.plot(logger_metrics[metric])
-        plt.show()
+        # for metric in logger_metrics.keys():
+        #     plt.figure()
+        #     plt.title(metric)
+        #     plt.plot(logger_metrics[metric])
+        # plt.show()
 
         return best_net, metrics_final

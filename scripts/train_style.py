@@ -64,7 +64,8 @@ validation_dataset = SHDataset(path_validation,
                                cache_dir="./")
 
 np.save(save_folder + 'mean_std.npy',
-        [train_dataset.mean, train_dataset.std])
+        [train_dataset.mean, train_dataset.std,
+         train_dataset.b0_mean, train_dataset.b0_std])
 
 
 net = ENet(sh_order=SIGNAL_PARAMETERS['sh_order'],
@@ -130,19 +131,19 @@ TRAINER_PARAMETERS = {
                 "type": "mse",
                 "inputs": ["sh_pred", "sh", "mask"],
                 "parameters": {},
-                "coeff": 1,
+                "coeff": 10,
             },
             {
                 "type": "mse",
                 "inputs": ["dwi_pred", "dwi", "mask"],
                 "parameters": {},
-                "coeff": 1e-4,
+                "coeff": 1e-3,
             },
             {
                 "type": "mse",
                 "inputs": ["mean_b0_pred", "mean_b0", "mask"],
                 "parameters": {},
-                "coeff": 1,
+                "coeff": 10,
             }
         ],
         "style": [],
@@ -183,10 +184,8 @@ feat_net, adv_metrics = style_trainer.train_feat_net(train_dataset,
 
 style_trainer.feat_net = feat_net
 
-validation_features = style_trainer.feat_net.predict_dataset(
+feat_net_pred = style_trainer.feat_net.predict_dataset(
     validation_dataset)
-# validation_features = {k: v['style_features']
-#                        for k, v in validation_features.items()}
 
 
 def flatten_dict(dic):
@@ -194,7 +193,7 @@ def flatten_dict(dic):
             for k in dic[list(dic.keys())[0]]}
 
 
-validation_features = flatten_dict(validation_features)
+validation_features = flatten_dict(feat_net_pred)
 
 # target_layers = [name for name in validation_features.keys() if "feat" in name]
 target_layers = ['dense_feat_1', 'conv_feat_2', 'conv_feat_3']
@@ -204,29 +203,47 @@ target_features = {layer: np.mean(validation_features[layer], axis=0)[None]
 layers_coeff = {name: 1 / len(target_layers) for name in target_layers}
 print(target_layers)
 
-style_losses = [
-    {"type": "gram",
-     "inputs": [layer],
-     "parameters": {"target_features": target_features[layer],
-                    "layers_coeff": layers_coeff[layer]},
-     "coeff": 1e5,
-     }
-    for layer in target_layers]
+style_losses = []
 
 # style_losses += [
-#     {"type": "feature",
+#     {"type": "gram",
 #      "inputs": [layer],
 #      "parameters": {"target_features": target_features[layer],
 #                     "layers_coeff": layers_coeff[layer]},
-#      "coeff": 10.,
+#      "coeff": 1e5,
 #      }
 #     for layer in target_layers]
+
+style_losses += [
+    {"type": "feature",
+     "inputs": [layer],
+     "parameters": {"target_features": target_features[layer],
+                    "layers_coeff": layers_coeff[layer]},
+     "coeff": 10.,
+     }
+    for layer in target_layers]
+
+
+# fa = []
+
+# style_losses += [
+#     {"type": "hist",
+#      "inputs": ["fa_pred"],
+#      "parameters": {"data": fa,
+#                     "bins": 25,
+#                     "min": 0.,
+#                     "max": 1.,
+#                     "scale": 100.,
+#                     "sigma": None},
+#      "coeff": 10.,
+#      }
+# ]
 
 style_trainer.set_style_loss(style_losses)
 
 net, metrics = style_trainer.train(train_dataset,
                                    validation_dataset,
-                                   num_epochs=50,
+                                   num_epochs=100,
                                    batch_size=10,
                                    validation=True)
 
