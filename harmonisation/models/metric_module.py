@@ -103,16 +103,8 @@ class FAModule(nn.Module):
 
         fit_result = fit_result[..., self._lt_indices]
 
-        # eigenvals, eigenvectors = Sym3Eig.apply(fit_result)
         eigenvals, eigenvectors = self.symeig_module(fit_result)
 
-        # shape = eigenvals.shape[:-1]
-        # eigenvals = eigenvals.reshape(-1, 3)
-        # size = eigenvals.shape[0]
-        # order = torch.flip(eigenvals.argsort(), dims=(1,))  # [:, ::-1]
-        # xi = np.ogrid[:size, :3][0]
-        # eigenvals = eigenvals[xi, order]
-        # eigenvals = eigenvals.reshape(shape + (3, ))
         eigenvals = eigenvals.clamp(min=self.min_diffusivity)
         eigenvals[torch.isnan(eigenvals)] = 0
 
@@ -134,7 +126,6 @@ class SymEig(nn.Module):
 
         self.clip_value = clip_value
         self.eps = eps
-        # self.register_backward_hook(self.hook)
 
     def hook(self, grad):
         return torch.clamp(grad, -self.clip_value, self.clip_value)

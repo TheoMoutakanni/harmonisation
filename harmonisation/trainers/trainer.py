@@ -88,37 +88,31 @@ class BaseTrainer():
         data = validation_dataset.get_data_by_name(name)
         sh_true = data['sh']  # torch.FloatTensor(data['sh'])
         data_mask = data['mask']  # torch.LongTensor(data['mask'])
-        sh_pred = self.net.predict_dataset(validation_dataset,
-                                           batch_size=batch_size,
-                                           names=[name])[name]
-
-        print('predicted')
+        net_pred = self.net.predict_dataset(validation_dataset,
+                                            batch_size=batch_size,
+                                            names=[name])[name]
 
         overlap_coeff = validation_dataset.signal_parameters['overlap_coeff']
 
         sh_pred = batch_to_xyz(
-            sh_pred,
+            net_pred['sh_pred'],
             data['real_size'],
             empty=data['empty'],
             overlap_coeff=overlap_coeff)
         sh_true = batch_to_xyz(
-            sh_true,
+            net_pred['sh_true'],
             data['real_size'],
             empty=data['empty'],
             overlap_coeff=overlap_coeff)
         mask = batch_to_xyz(
-            data_mask,
+            net_pred['mask'],
             data['real_size'],
             empty=data['empty'],
             overlap_coeff=overlap_coeff)
 
-        print('batch')
-
         sh_pred = torch.FloatTensor(sh_pred)
         sh_true = torch.FloatTensor(sh_true)
         mask = torch.LongTensor(mask)
-
-        print('go')
 
         # print_peaks(sh_true)
         # print_peaks(sh_pred)
@@ -191,7 +185,7 @@ class BaseTrainer():
               batch_size=128,
               validation=True,
               metrics_final=None,
-              freq_print=50):
+              freq_print=None):
 
         train_dataset.set_return_site(False)
         validation_dataset.set_return_site(False)
@@ -271,7 +265,8 @@ class BaseTrainer():
                 for metric in metrics_epoch.keys():
                     logger_metrics[metric].append(metrics_epoch[metric])
 
-                if epoch % freq_print == 0 and epoch != 0:
+                if freq_print is not None and (
+                        epoch % freq_print == 0 and epoch != 0):
                     self.print_metrics(validation_dataset, batch_size)
 
             for name, metric in metrics_epoch.items():

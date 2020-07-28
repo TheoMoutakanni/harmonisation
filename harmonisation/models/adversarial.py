@@ -35,8 +35,7 @@ def conv_block_2_3d(in_dim, out_dim, activation, normalization):
 
 class AdversarialNet(BaseNet):
     def __init__(self, in_dim, out_dim, num_filters,
-                 nb_layers, embed_size, patch_size, modules,
-                 return_dict_layers=False):
+                 nb_layers, embed_size, patch_size, modules):
         super(AdversarialNet, self).__init__(
             in_dim=in_dim,
             out_dim=out_dim,
@@ -44,8 +43,8 @@ class AdversarialNet(BaseNet):
             nb_layers=nb_layers,
             embed_size=embed_size,
             patch_size=patch_size,
-            # modules=modules,
-            return_dict_layers=return_dict_layers)
+            # modules=modules)
+            )
 
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -53,7 +52,6 @@ class AdversarialNet(BaseNet):
         self.nb_layers = nb_layers
         self.embed_size = embed_size
         self.patch_size = np.array(patch_size)
-        self.return_dict_layers = return_dict_layers
 
         self.inputs = ['sh', 'mean_b0', 'mask']
 
@@ -109,14 +107,9 @@ class AdversarialNet(BaseNet):
 
         out = self.classifier_out(x)
 
-        dict_layer = out_feat
+        out_feat['y_proba'] = out
 
-        dict_layer['y_proba'] = out
-
-        if self.return_dict_layers:
-            return dict_layer
-        else:
-            return out
+        return out_feat
 
 
 class OldAdversarialNet(BaseNet):

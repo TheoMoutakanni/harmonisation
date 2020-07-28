@@ -11,11 +11,11 @@ import scipy.stats as stats
 
 from harmonisation.utils import get_paths_SIMON
 
-save_folder = "./.saved_models/style_test/"
+save_folder = "./.saved_models/style_feat_2/"
 
 paths, sites = get_paths_SIMON()
-paths_fake, sites_fake = get_paths_SIMON(
-    simon_path='/home/theo/Documents/Harmonisation/data/CCNA')
+paths_fake, _ = get_paths_SIMON(
+    simon_path='/home/theo/Documents/Harmonisation/data/CCNA_feat_2')
 
 folds = {}
 with open(save_folder + "train_val_test.txt", "r") as file:
@@ -89,7 +89,7 @@ for path in tqdm.tqdm(paths_fake):
         if '_mask' in metric:
             continue
         data[metric] = data[metric].reshape(-1)
-        if metric in ['fa', 'md', 'ad', 'rd']:  # ['fa', 'md', 'ad', 'rd']:
+        if metric in ['fa', 'md', 'ad', 'rd']:
             data[metric] = data[metric][df.loc[path['name']]['wm_mask'] != 0]
         elif metric in []:
             data[metric] = data[metric][df.loc[path['name']]['csf_mask'] != 0]
@@ -183,7 +183,7 @@ for metric in metrics:
     # ax = sns.swarmplot(data=df, x='site', y=metric + '_mean', hue='fake',
     #                    linewidth=.9, edgecolor="black", size=6, dodge=True)
     g = sns.catplot(x='site', y=metric + '_mean', hue='fold', col='fake',
-                    data=df, kind='swarm', linewidth=.9, dodge=False)
+                    data=df, kind='swarm', linewidth=.9, dodge=False, sharey=False)
     d = sns.catplot(x='fake', y=metric + '_mean', hue='real_name',
                     data=df, kind='point')
 

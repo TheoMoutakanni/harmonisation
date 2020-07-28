@@ -119,20 +119,20 @@ class FocalLoss(nn.Module):
             self.alpha = torch.Tensor(alpha)
         self.size_average = size_average
 
-    def forward(self, input, target):
-        if input.dim() > 2:
+    def forward(self, inputs, target):
+        if inputs.dim() > 2:
             # N,H,W,D,C => N*H*W*D,C
-            input = input.view(-1, input.size(-1))
+            inputs = inputs.view(-1, inputs.size(-1))
         target = target.view(-1, 1)
 
-        logpt = F.log_softmax(input)
+        logpt = F.log_softmax(inputs)
         logpt = logpt.gather(1, target)
         logpt = logpt.view(-1)
         pt = Variable(logpt.data.exp())
 
         if self.alpha is not None:
-            if self.alpha.type() != input.data.type():
-                self.alpha = self.alpha.type_as(input.data)
+            if self.alpha.type() != inputs.data.type():
+                self.alpha = self.alpha.type_as(inputs.data)
             at = self.alpha.gather(0, target.data.view(-1))
             logpt = logpt * Variable(at)
 
@@ -141,6 +141,26 @@ class FocalLoss(nn.Module):
             return loss.mean()
         else:
             return loss.sum()
+
+
+class L2Reg(nn.Module):
+    def __init__(self):
+        super(L2Reg, self).__init__()
+
+    def forward(self, inputs):
+        batch_size = inputs.shape[0]
+        return (inputs**2).sum() / batch_size
+
+
+class SmoothReg(nn.Module):
+    def __init__(self):
+        super(SmoothReg, self).__init__()
+
+    def forward(self, y):
+        dx = torch.sum(torch.abs(y[:, :-1, :, :, :] - y[:, 1:, :, :, :]))
+        dy = torch.sum(torch.abs(y[:, :, :-1, :, :] - y[:, :, 1:, :, :]))
+        dz = torch.sum(torch.abs(y[:, :, :, :-1, :] - y[:, :, :, 1:, :]))
+        return (dx + dy + dz) / np.prod(y.shape[:-1])
 
 
 def gram_matrix(input):
@@ -261,6 +281,9 @@ def get_loss_dict():
         'bce': nn.BCELoss,
         'cross_entropy': nn.CrossEntropyLoss,
         'focal': FocalLoss,
+
+        'l2_reg': L2Reg,
+        'smooth_reg': SmoothReg,
     }
 
 

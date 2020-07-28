@@ -81,7 +81,7 @@ def batch_to_xyz(dmri_batch, real_size, empty=None, overlap_coeff=1,
                                 dtype=dmri_batch.dtype)
 
         # Get the weigths
-        if remove_border is not None:
+        if remove_border is not None and remove_border > 0:
             weigths = torch.ones((patch_x, patch_y, patch_z))
             weigths[:remove_border] = 0
             weigths[-remove_border:] = 0

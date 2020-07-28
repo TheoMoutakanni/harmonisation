@@ -15,7 +15,7 @@ import numpy as np
 
 save_folder = "./.saved_models/style_test/"
 dwi_file = 'HAM_DTI_2018'  # '003_S_4288_S142486'
-net_file = '45_net.tar.gz'
+net_file = '48_net.tar.gz'
 
 SIGNAL_PARAMETERS['overlap_coeff'] = 2
 
@@ -42,7 +42,6 @@ dataset = SHDataset(paths,
 net, _ = ENet.load(save_folder + net_file)
 
 net = net.to("cuda")
-net.return_dict_layers = True
 net.eval()
 
 # Get the dmri name
@@ -56,7 +55,7 @@ sh_true = batch_to_xyz(
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'])
 sh_true = sh_true * dataset.std + dataset.mean
 
-net_pred = net.predict_dataset(dataset, batch_size=16)[dwi_name]
+net_pred = net.predict_dataset(dataset, batch_size=16, numpy=False)[dwi_name]
 sh_pred = net_pred['sh_pred']
 mean_b0_pred = net_pred['mean_b0_pred']
 alpha = net_pred['alpha']
@@ -67,7 +66,7 @@ sh_pred = batch_to_xyz(
     data['real_size'],
     empty=data['empty'],
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-    remove_border=1)
+    remove_border=1).numpy()
 sh_pred = sh_pred * dataset.std + dataset.mean
 
 mean_b0_pred = batch_to_xyz(
@@ -75,7 +74,7 @@ mean_b0_pred = batch_to_xyz(
     data['real_size'],
     empty=data['empty'],
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-    remove_border=1)
+    remove_border=1).numpy()
 mean_b0_pred = mean_b0_pred * dataset.b0_std + dataset.b0_mean
 
 alpha = batch_to_xyz(
@@ -83,14 +82,14 @@ alpha = batch_to_xyz(
     data['real_size'],
     empty=data['empty'],
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-    remove_border=1)
+    remove_border=1).numpy()
 
 beta = batch_to_xyz(
     beta,
     data['real_size'],
     empty=data['empty'],
     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-    remove_border=1)
+    remove_border=1).numpy()
 
 mask = batch_to_xyz(
     data['mask'],

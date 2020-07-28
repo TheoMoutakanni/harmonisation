@@ -90,10 +90,12 @@ class BaseNet(nn.Module, object):
         if isinstance(obj[0], dict):
             return {k: self.concatenate([d[k] for d in obj])
                     for k in obj[0].keys()}
-        else:
+        elif isinstance(obj[0], np.ndarray):
             return np.concatenate(obj)
+        else:
+            return torch.cat(obj)
 
-    def predict_dataset(self, dataset, batch_size=128, names=None):
+    def predict_dataset(self, dataset, batch_size=128, names=None, numpy=True):
         """Predicts signals in dictionnary inference_dataset = {name: data}.
         """
         with torch.no_grad():
@@ -121,7 +123,7 @@ class BaseNet(nn.Module, object):
                                     for signal in signal_batch]
                     signal_pred = self.forward(*signal_batch)
                     results[dmri_name].append(self.move_to(signal_pred, 'cpu',
-                                                           numpy=True))
+                                                           numpy=numpy))
                 results[dmri_name] = self.concatenate(results[dmri_name])
 
         return results

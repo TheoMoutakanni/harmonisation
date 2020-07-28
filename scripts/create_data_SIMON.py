@@ -1,7 +1,7 @@
 from harmonisation.functions.shm import sh_to_dwi, normalize_data
 from harmonisation.datasets import SHDataset
 from harmonisation.datasets.utils import batch_to_xyz
-from harmonisation.utils import get_paths_ADNI, get_paths_SIMON
+from harmonisation.utils import get_paths_ADNI, get_paths_PPMI, get_paths_SIMON
 from harmonisation.models import ENet
 
 from harmonisation.settings import SIGNAL_PARAMETERS
@@ -14,13 +14,20 @@ import numpy as np
 import os
 import tqdm
 
+remove_border = None
 
 save_folder = "./.saved_models/style_test/"
-net_file = '47_net.tar.gz'
+net_file = '48_net.tar.gz'
 
 SIGNAL_PARAMETERS['overlap_coeff'] = 2
+# SIGNAL_PARAMETERS['patch_size'] = [32, 32, 32]
 
-paths, _ = get_paths_SIMON()  # get_paths_ADNI()
+paths, _ = get_paths_SIMON()
+# paths = get_paths_PPMI()[0]
+# paths += get_paths_ADNI()[0]
+
+paths = [p for p in paths if p['name'] in os.listdir('./data/CCNA/')]
+
 
 mean, std, b0_mean, b0_std = np.load(save_folder + 'mean_std.npy',
                                      allow_pickle=True)
@@ -72,7 +79,9 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
     #     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'])
     # sh_true = sh_true * dataset.std + dataset.mean
 
-    net_pred = net.predict_dataset(dataset, batch_size=32)[dwi_name]
+    net_pred = net.predict_dataset(dataset,
+                                   batch_size=1,
+                                   numpy=False)[dwi_name]
     sh_pred = net_pred['sh_pred']
     mean_b0_pred = net_pred['mean_b0_pred']
     alpha = net_pred['alpha']
@@ -83,7 +92,7 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
         data['real_size'],
         empty=data['empty'],
         overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-        remove_border=2)
+        remove_border=remove_border).numpy()
     sh_pred = sh_pred * dataset.std + dataset.mean
 
     mean_b0_pred = batch_to_xyz(
@@ -91,7 +100,7 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
         data['real_size'],
         empty=data['empty'],
         overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-        remove_border=2)
+        remove_border=remove_border).numpy()
     mean_b0_pred = mean_b0_pred * dataset.b0_std + dataset.b0_mean
 
     alpha = batch_to_xyz(
@@ -99,14 +108,14 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
         data['real_size'],
         empty=data['empty'],
         overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-        remove_border=2)
+        remove_border=remove_border).numpy()
 
     beta = batch_to_xyz(
         beta,
         data['real_size'],
         empty=data['empty'],
         overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-        remove_border=2)
+        remove_border=remove_border).numpy()
 
     mask = batch_to_xyz(
         data['mask'],

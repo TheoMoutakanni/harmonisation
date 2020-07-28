@@ -57,7 +57,7 @@ def get_paths_ADNI(patients=None):
          'mask': pjoin(ADNI_PATH, 'raw', patient, 'brain_mask.nii.gz')}
         for patient in patients]
 
-    return path_dicts
+    return path_dicts, None
 
 
 def get_paths_PPMI(patients=None):

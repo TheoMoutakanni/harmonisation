@@ -3,7 +3,7 @@ Train an autoencoder with an adversarial loss
 """
 
 from harmonisation.datasets import SHDataset, AdversarialDataset
-from harmonisation.utils import (get_paths_PPMI, get_paths_ADNI, get_paths_SIMON,
+from harmonisation.utils import (get_paths_PPMI, get_paths_ADNI,
                                  train_test_val_split)
 from harmonisation.models.metric_module import FAModule, DWIModule
 from harmonisation.trainers import StyleTrainer
@@ -16,12 +16,20 @@ from dipy.core.gradients import gradient_table
 
 import numpy as np
 
-save_folder = "./.saved_models/style_test/"
+save_folder = "./.saved_models/style_adni_ppmi/"
 
 blacklist = ['003_S_4288_S142486', '3169_BL_01',
              '3169_V04_00', '3168_BL_00', '3167_SC_01']
 
-paths, sites_dict = get_paths_SIMON()
+paths_ADNI, _ = get_paths_ADNI()
+for p in paths_ADNI:
+    p['site'] = 0
+paths_PPMI, _ = get_paths_PPMI()
+for p in paths_PPMI:
+    p['site'] = 1
+
+paths = paths_ADNI + paths_PPMI[:20]
+sites_dict = {0: 'ADNI', 1: 'PPMI'}
 
 path_train, path_validation, path_test = train_test_val_split(
     paths,
@@ -29,7 +37,8 @@ path_train, path_validation, path_test = train_test_val_split(
     validation_proportion=10 / 30,
     # balanced_classes=[0, 1, 2],
     max_combined_size=30,
-    blacklist=blacklist)
+    blacklist=blacklist,
+    seed=42)
 
 print("Train dataset size :", len(path_train))
 print("Test dataset size :", len(path_test))
@@ -93,16 +102,8 @@ fa_module = fa_module.to("cuda")
 
 modules = {'fa': fa_module, 'dwi': dwi_module}
 
-feat_net = AdversarialNet(in_dim=1,
-                          out_dim=len(sites_dict),
-                          num_filters=4,
-                          nb_layers=4,
-                          embed_size=256,
-                          patch_size=SIGNAL_PARAMETERS["patch_size"],
-                          modules=modules)
-
-# feat_net = AdversarialNet.load(save_folder + '49_feat_net.tar.gz',
-#                                modules=modules)
+feat_net, _ = AdversarialNet.load("./.saved_models/style_test/" + '40_featnet.tar.gz',
+                                  modules=modules)
 
 net = net.to("cuda")
 feat_net = feat_net.to("cuda")
@@ -142,23 +143,23 @@ TRAINER_PARAMETERS = {
                 "parameters": {},
                 "coeff": 10,
             },
-            # {
-            #     "type": "l2_reg",
-            #     "inputs": ["beta"],
-            #     "parameters": {},
-            #     "coeff": 1e-4,
-            # },
+            {
+                "type": "l2_reg",
+                "inputs": ["beta"],
+                "parameters": {},
+                "coeff": 1e-4,
+            },
             {
                 "type": "smooth_reg",
                 "inputs": ["alpha"],
                 "parameters": {},
-                "coeff": 1e-2,
+                "coeff": 1e-3,
             },
             {
                 "type": "smooth_reg",
                 "inputs": ["beta"],
                 "parameters": {},
-                "coeff": 1e-2,
+                "coeff": 1e-3,
             }
         ],
         "style": [],
@@ -190,17 +191,17 @@ style_trainer = StyleTrainer(
 
 # Train both networks each epoch
 
-feat_net, adv_metrics = style_trainer.train_feat_net(train_dataset,
-                                                     validation_dataset,
-                                                     coeff_fake=0,
-                                                     num_epochs=50,
-                                                     batch_size=32,
-                                                     validation=True)
+# feat_net, adv_metrics = style_trainer.train_feat_net(train_dataset,
+#                                                      validation_dataset,
+#                                                      coeff_fake=0,
+#                                                      num_epochs=50,
+#                                                      batch_size=32,
+#                                                      validation=True)
 
-style_trainer.feat_net = feat_net
+# style_trainer.feat_net = feat_net
 
 feat_net_pred = style_trainer.feat_net.predict_dataset(
-    validation_dataset)
+    validation_dataset, batch_size=32)
 
 
 def flatten_dict(dic):
@@ -211,7 +212,7 @@ def flatten_dict(dic):
 validation_features = flatten_dict(feat_net_pred)
 
 # target_layers = [name for name in validation_features.keys() if "feat" in name]
-target_layers = ['dense_feat_1', 'conv_feat_2', 'conv_feat_3']
+target_layers = ['dense_feat_1', 'conv_feat_3']  # 'conv_feat_2'
 
 target_features = {layer: np.mean(validation_features[layer], axis=0)[None]
                    for layer in target_layers}
