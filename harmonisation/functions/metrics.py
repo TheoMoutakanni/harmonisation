@@ -29,8 +29,14 @@ def weighted_mse_loss(X, Z, weight, axis=-1):
     return torch.sum(weight * (X - Z) ** 2, axis=axis) / torch.sum(weight)
 
 
-def torch_accuracy(labels, proba):
-    predicted = torch.argmax(proba, dim=1)
+def torch_accuracy(labels, logits):
+    if len(labels.shape) == 1:
+        labels = labels[None]
+    if logits.shape[1] > 1:
+        predicted = torch.argmax(logits, dim=1)
+    else:
+        proba = torch.sigmoid(logits)
+        predicted = (proba >= 0.5).float()
     accuracy = (predicted == labels).float().mean()
     return accuracy
 
@@ -213,7 +219,7 @@ def torch_fa(evals):
     return fa
 
 
-def get_metrics_fun():
+def get_metric_dict():
     """Return a dict with all the metrics to be computed during an epoch
     Metrics must be greater when better, so -mse instead of mse for example"""
     return {
@@ -225,3 +231,14 @@ def get_metrics_fun():
 
         'accuracy': lambda labels, proba: torch_accuracy(labels, proba),
     }
+
+
+def get_metric_fun(metric_specs):
+    metric_dict = get_metric_dict()
+    metrics = {
+        specs['type']: {
+            'fun': metric_dict[specs['type']],
+            'inputs': specs['inputs'],
+            'use_fake': specs['use_fake']}
+        for specs in metric_specs}
+    return metrics

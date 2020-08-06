@@ -17,7 +17,7 @@ import tqdm
 remove_border = None
 
 save_folder = "./.saved_models/style_test/"
-net_file = '48_net.tar.gz'
+net_file = '46_net.tar.gz'
 
 SIGNAL_PARAMETERS['overlap_coeff'] = 2
 # SIGNAL_PARAMETERS['patch_size'] = [32, 32, 32]

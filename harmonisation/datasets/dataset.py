@@ -34,8 +34,6 @@ class SHDataset(torch.utils.data.Dataset):
         self.b0_std = b0_std
         self.patch_size = patch_size
 
-        self._return_site = False
-
         get_data = process_data
         if cache_dir is not None:
             memory = Memory(cache_dir + "/.cache/",
@@ -91,21 +89,18 @@ class SHDataset(torch.utils.data.Dataset):
         signal = self.data[patient_idx]['sh'][patch_idx]
         mask = self.data[patient_idx]['mask'][patch_idx]
         mean_b0 = self.data[patient_idx]['mean_b0'][patch_idx]
+        site = self.data[patient_idx]['site']
 
         signal = torch.FloatTensor(signal)
         mask = torch.LongTensor(mask)
         mean_b0 = torch.FloatTensor(mean_b0)
+        site = torch.LongTensor(site)
 
         if self.transformations is not None:
             signal = self.transformations(signal)
 
-        if not self._return_site:
-            return {'sh': signal, 'mask': mask, 'mean_b0': mean_b0}
-        else:
-            site = self.data[patient_idx]['site']
-            site = torch.LongTensor([site])
-            return {'sh': signal, 'mask': mask,
-                    'mean_b0': mean_b0, 'site': site}
+        return {'sh': signal, 'mask': mask,
+                'mean_b0': mean_b0, 'site': site}
 
     def get_data_by_name(self, dmri_name):
         """Return a dict with params:
@@ -135,6 +130,3 @@ class SHDataset(torch.utils.data.Dataset):
         for d in self.data:
             d['sh'] = (d['sh'] - self.mean) / self.std
             d['mean_b0'] = (d['mean_b0'] - self.b0_mean) / self.b0_std
-
-    def set_return_site(self, bool):
-        self._return_site = bool

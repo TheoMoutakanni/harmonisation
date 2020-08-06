@@ -108,6 +108,38 @@ class RISMSELoss(nn.Module):
         return torch_mse_RIS(X, Z, mask).mean()
 
 
+class onlyones_BCEWithLogitsLoss(nn.Module):
+    def __init__(self, weight=None, pos_weight=None, reduction='mean'):
+        super(onlyones_BCEWithLogitsLoss, self).__init__()
+        self.weight = weight
+        self.pos_weight = pos_weight
+        self.reduction = reduction
+
+    def forward(self, logits):
+        target = torch.ones(logits.shape, device=logits.device)
+        return F.binary_cross_entropy_with_logits(
+            logits, target,
+            self.weight,
+            pos_weight=self.pos_weight,
+            reduction=self.reduction)
+
+
+class onlyzeros_BCEWithLogitsLoss(nn.Module):
+    def __init__(self, weight=None, pos_weight=None, reduction='mean'):
+        super(onlyzeros_BCEWithLogitsLoss, self).__init__()
+        self.weight = weight
+        self.pos_weight = pos_weight
+        self.reduction = reduction
+
+    def forward(self, logits):
+        target = torch.zeros(logits.shape, device=logits.device)
+        return F.binary_cross_entropy_with_logits(
+            logits, target,
+            self.weight,
+            pos_weight=self.pos_weight,
+            reduction=self.reduction)
+
+
 class FocalLoss(nn.Module):
     def __init__(self, gamma=0, alpha=None, size_average=True):
         super(FocalLoss, self).__init__()
@@ -279,6 +311,9 @@ def get_loss_dict():
         'hist': HistLoss,
 
         'bce': nn.BCELoss,
+        'bce_logits': nn.BCEWithLogitsLoss,
+        'bce_logits_ones': onlyones_BCEWithLogitsLoss,
+        'bce_logits_zeros': onlyzeros_BCEWithLogitsLoss,
         'cross_entropy': nn.CrossEntropyLoss,
         'focal': FocalLoss,
 

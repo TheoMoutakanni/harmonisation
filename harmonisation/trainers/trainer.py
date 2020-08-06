@@ -50,24 +50,24 @@ class BaseTrainer():
         """
         data_true = {name: validation_dataset.get_data_by_name(name)
                      for name in validation_dataset.names}
-        data_pred = self.net.predict_dataset(validation_dataset,
+        data_fake = self.net.predict_dataset(validation_dataset,
                                              batch_size=batch_size)
-        metrics_fun = metrics.get_metrics_fun()
+        metrics_fun = metrics.get_metric_dict()
 
         metrics_batches = []
-        for name in list(set(data_pred.keys()) & set(data_true.keys())):
+        for name in list(set(data_fake.keys()) & set(data_true.keys())):
             dic = dict()
             for metric in self.metrics:
                 metric_calc = []
                 nb_batches = int(
-                    np.ceil(len(data_pred[name]['sh_pred']) / batch_size))
+                    np.ceil(len(data_fake[name]['sh_fake']) / batch_size))
                 for batch in range(nb_batches):
                     idx = range(batch * batch_size,
                                 min((batch + 1) * batch_size,
-                                    len(data_pred[name]['sh_pred'])))
+                                    len(data_fake[name]['sh_fake'])))
                     metric_calc.append(metrics_fun[metric](
                         torch.FloatTensor(data_true[name]['sh'][idx]),
-                        torch.FloatTensor(data_pred[name]['sh_pred'][idx]),
+                        torch.FloatTensor(data_fake[name]['sh_fake'][idx]),
                         torch.LongTensor(data_true[name]['mask'][idx])
                     ))
                 dic[metric] = metrics.nanmean(torch.cat(metric_calc)).numpy()
@@ -81,77 +81,17 @@ class BaseTrainer():
 
         return metrics_epoch
 
-    def print_metrics(self, validation_dataset, batch_size=128):
-        # Print fODF, RIS and acc for a slice of a validation dwi
-        print('print')
-        name = validation_dataset.names[0]
-        data = validation_dataset.get_data_by_name(name)
-        sh_true = data['sh']  # torch.FloatTensor(data['sh'])
-        data_mask = data['mask']  # torch.LongTensor(data['mask'])
-        net_pred = self.net.predict_dataset(validation_dataset,
-                                            batch_size=batch_size,
-                                            names=[name])[name]
-
-        overlap_coeff = validation_dataset.signal_parameters['overlap_coeff']
-
-        sh_pred = batch_to_xyz(
-            net_pred['sh_pred'],
-            data['real_size'],
-            empty=data['empty'],
-            overlap_coeff=overlap_coeff)
-        sh_true = batch_to_xyz(
-            net_pred['sh_true'],
-            data['real_size'],
-            empty=data['empty'],
-            overlap_coeff=overlap_coeff)
-        mask = batch_to_xyz(
-            net_pred['mask'],
-            data['real_size'],
-            empty=data['empty'],
-            overlap_coeff=overlap_coeff)
-
-        sh_pred = torch.FloatTensor(sh_pred)
-        sh_true = torch.FloatTensor(sh_true)
-        mask = torch.LongTensor(mask)
-
-        # print_peaks(sh_true)
-        # print_peaks(sh_pred)
-
-        if validation_dataset.mean is not None:
-            sh_true = sh_true * validation_dataset.std + validation_dataset.mean
-            sh_pred = sh_pred * validation_dataset.std + validation_dataset.mean
-
-        print(metrics.torch_RIS(sh_true[50:51, 50:51, 28:29]))
-        print(metrics.torch_RIS(sh_pred[50:51, 50:51, 28:29]))
-        print_data(metrics.torch_gfa(sh_true),
-                   metrics.torch_gfa(sh_pred),
-                   mask)
-        print_data(metrics.torch_anisotropic_power(sh_true),
-                   metrics.torch_anisotropic_power(sh_pred),
-                   mask)
-
-        # dwi_true = shm.sh_to_dwi(sh_true, data['gtab'])
-        # dwi_pred = shm.sh_to_dwi(sh_pred, data['gtab'])
-        # evals_true = metrics.ols_fit_tensor(dwi_true, data['gtab'])
-        # evals_pred = metrics.ols_fit_tensor(dwi_pred, data['gtab'])
-        # print_data(metrics.torch_fa(evals_true),
-        #           metrics.torch_fa(evals_pred),
-        #           mask)
-
-        print_RIS(metrics.torch_RIS(sh_true), metrics.torch_RIS(sh_pred), mask)
-        print_diff(sh_true, sh_pred, mask, 'mse', normalize=False)
-
     def compute_modules(self, inputs_needed, inputs):
         if 'dwi' in inputs_needed and 'dwi' not in inputs.keys():
             inputs['dwi'] = self.modules['dwi'](inputs['sh'],
                                                 inputs['mean_b0'])
-        if 'dwi_pred' in inputs_needed and 'dwi_pred' not in inputs.keys():
-            inputs['dwi_pred'] = self.modules['dwi'](inputs['sh_pred'],
-                                                     inputs['mean_b0_pred'])
+        if 'dwi_fake' in inputs_needed and 'dwi_fake' not in inputs.keys():
+            inputs['dwi_fake'] = self.modules['dwi'](inputs['sh_fake'],
+                                                     inputs['mean_b0_fake'])
         if 'fa' in inputs_needed and 'fa' not in inputs.keys():
             inputs['fa'] = self.modules['fa'](inputs['dwi'], inputs['mask'])
-        if 'fa_pred' in inputs_needed and 'fa_pred' not in inputs.keys():
-            inputs['fa_pred'] = self.modules['fa'](inputs['dwi_pred'],
+        if 'fa_fake' in inputs_needed and 'fa_fake' not in inputs.keys():
+            inputs['fa_fake'] = self.modules['fa'](inputs['dwi_fake'],
                                                    inputs['mask'])
 
         return inputs
@@ -187,9 +127,6 @@ class BaseTrainer():
               metrics_final=None,
               freq_print=None):
 
-        train_dataset.set_return_site(False)
-        validation_dataset.set_return_site(False)
-
         dataloader_parameters = {
             "num_workers": 0,
             "shuffle": True,
@@ -207,8 +144,6 @@ class BaseTrainer():
             metric: -np.inf
             for metric in self.metrics
         }
-
-        logger_metrics = {metric: [] for metric in metrics_epoch.keys()}
 
         best_value = metrics_final[self.metric_to_maximize]
         best_net = copy.deepcopy(self.net)
@@ -262,12 +197,9 @@ class BaseTrainer():
 
                 metrics_epoch = self.validate(validation_dataset, batch_size)
 
-                for metric in metrics_epoch.keys():
-                    logger_metrics[metric].append(metrics_epoch[metric])
-
-                if freq_print is not None and (
-                        epoch % freq_print == 0 and epoch != 0):
-                    self.print_metrics(validation_dataset, batch_size)
+                # if freq_print is not None and (
+                #         epoch % freq_print == 0 and epoch != 0):
+                #     self.print_metrics(validation_dataset, batch_size)
 
             for name, metric in metrics_epoch.items():
                 self.writer.add_scalar('metric/' + name + '_val',
@@ -290,11 +222,5 @@ class BaseTrainer():
 
             if counter_patience > self.patience:
                 break
-
-        # for metric in logger_metrics.keys():
-        #     plt.figure()
-        #     plt.title(metric)
-        #     plt.plot(logger_metrics[metric])
-        # plt.show()
 
         return best_net, metrics_final

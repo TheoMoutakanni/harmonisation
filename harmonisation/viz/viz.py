@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from harmonisation.functions.metrics import get_metrics_fun
+from harmonisation.functions.metrics import get_metric_dict
 from harmonisation.settings import SIGNAL_PARAMETERS
 
 
@@ -39,7 +39,7 @@ def print_peaks(sh_signal, mask=None):
 
 def print_diff(sh_true, sh_pred, mask, metric_name,
                normalize=False, fig_name=None):
-    metric = get_metrics_fun()[metric_name](sh_true,
+    metric = get_metric_dict()[metric_name](sh_true,
                                             sh_pred,
                                             mask)
 

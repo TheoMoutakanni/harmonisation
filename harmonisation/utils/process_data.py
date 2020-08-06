@@ -59,6 +59,6 @@ def process_data(path_dict, gtab, signal_parameters):
             'gtab': gtab}
 
     if 'site' in path_dict.keys():
-        data['site'] = path_dict['site']
+        data['site'] = [path_dict['site']]
 
     return data

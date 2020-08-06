@@ -508,14 +508,14 @@ class ENet(BaseNet):
         self.ncoef = int((sh_order + 2) * (sh_order + 1) / 2)
         self.ncoef += 1
 
-        self.norm_beforedown_0 = nn.InstanceNorm3d(self.ncoef, affine=True)
+        # self.norm_beforedown_0 = nn.InstanceNorm3d(self.ncoef, affine=True)
 
         self.initial_block = InitialBlock(self.ncoef,
                                           embed[0], relu=encoder_relu)
 
         # Stage 1 - Encoder
 
-        self.norm_beforedown_1 = nn.InstanceNorm3d(embed[0], affine=True)
+        # self.norm_beforedown_1 = nn.InstanceNorm3d(embed[0], affine=True)
 
         # self.replace_down1 = nn.Sequential(
         #     nn.Conv3d(
@@ -544,7 +544,7 @@ class ENet(BaseNet):
 
         # Stage 2 - Encoder
 
-        self.norm_beforedown_2 = nn.InstanceNorm3d(embed[1], affine=True)
+        # self.norm_beforedown_2 = nn.InstanceNorm3d(embed[1], affine=True)
 
         # self.replace_down2 = nn.Sequential(
         #     nn.Conv3d(
@@ -639,26 +639,26 @@ class ENet(BaseNet):
 
         self.transposed_conv = nn.ConvTranspose3d(
             embed[0],
-            self.ncoef,
+            self.ncoef * 2,
             kernel_size=3,
             stride=2,
             padding=1,
             bias=False)
 
-        self.conv6_2 = nn.Sequential(
-            nn.Conv3d(
-                self.ncoef,
-                self.ncoef,
-                kernel_size=5,
-                padding=2,
-                bias=True),
-            nn.BatchNorm3d(self.ncoef),
-            nn.ReLU(),
-            nn.Conv3d(
-                self.ncoef,
-                self.ncoef * 2,
-                kernel_size=1,
-                bias=True))
+        # self.conv6_2 = nn.Sequential(
+        #     nn.Conv3d(
+        #         self.ncoef,
+        #         self.ncoef,
+        #         kernel_size=5,
+        #         padding=2,
+        #         bias=True),
+        #     nn.BatchNorm3d(self.ncoef),
+        #     nn.ReLU(),
+        #     nn.Conv3d(
+        #         self.ncoef,
+        #         self.ncoef * 2,
+        #         kernel_size=1,
+        #         bias=True))
 
         self.convout_1 = nn.Sequential(
             nn.Conv3d(
@@ -769,7 +769,7 @@ class ENet(BaseNet):
         x_out_1 = self.convout_1(x)
 
         x = self.transposed_conv(x, output_size=input_size)
-        x = self.conv6_2(x)
+        # x = self.conv6_2(x)
 
         beta_0, alpha_0 = x[:, :self.ncoef], x[:, self.ncoef:]
         beta_1, alpha_1 = x_out_1[:, :self.ncoef], x_out_1[:, self.ncoef:]
@@ -798,7 +798,7 @@ class ENet(BaseNet):
         sh_pred = x[..., 1:]
         mean_b0_pred = x[..., :1]
 
-        x_feat['sh_pred'] = sh_pred
-        x_feat['mean_b0_pred'] = mean_b0_pred
+        x_feat['sh_fake'] = sh_pred
+        x_feat['mean_b0_fake'] = mean_b0_pred
 
         return x_feat
