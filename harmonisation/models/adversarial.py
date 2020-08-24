@@ -91,7 +91,7 @@ class AdversarialNet(BaseNet):
         self.classifier_out = fun(nn.Linear(self.embed_size, self.out_dim))
 
     def forward(self, x, mean_b0, mask):
-        out_feat = {}
+        out_dict = {}
 
         dwi = self.modules['dwi'](x, mean_b0)
         fa = self.modules['fa'](dwi, mask)
@@ -103,14 +103,14 @@ class AdversarialNet(BaseNet):
 
         for name, layer in self.classifier_feat.items():
             x = layer(x)
-            out_feat[name] = x
+            out_dict[name] = x
 
         for name, layer in self.classifier_dense.items():
             x = layer(x)
-            out_feat[name] = x
+            out_dict[name] = x
 
         out = self.classifier_out(x)
 
-        out_feat['y_logits'] = out
+        out_dict['y_logits'] = out
 
-        return out_feat
+        return out_dict

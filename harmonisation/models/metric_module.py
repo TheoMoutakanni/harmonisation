@@ -145,8 +145,9 @@ class SymEig(nn.Module):
 
         eigenvals, eigenvectors = Sym3Eig.apply(x)
         if x.requires_grad:
-            eigenvals.register_hook(self.hook)
+            # eigenvals.register_hook(self.hook)
             # eigenvectors.register_hook(self.hook)
+            pass
 
         eigenvals = eigenvals.reshape(*shape, 3)
         eigenvectors = eigenvectors.reshape(*shape, 3, 3)

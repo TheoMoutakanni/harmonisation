@@ -97,7 +97,11 @@ sites_net = AdversarialNet(in_dim=1,
                            nb_layers=4,
                            embed_size=256,
                            patch_size=SIGNAL_PARAMETERS["patch_size"],
-                           modules=modules)
+                           modules=modules,
+                           spectral_norm=True)
+
+# sites_net, _ = AdversarialNet.load("./.saved_models/style_test_fonctionne_2/sites_55.tar.gz",
+#                                    modules=modules)
 
 discriminator_net = AdversarialNet(in_dim=1,
                                    out_dim=1,
@@ -119,16 +123,20 @@ TRAINER_PARAMETERS = {
     "optimizer_parameters": {
         "autoencoder": {
             "lr": 1e-3,
-            "weight_decay": 1e-8,
+            "weight_decay": 1e-5,
         },
         "adversarial": {
             "sites": {
                 "lr": 0.001,
-                "weight_decay": 1e-8,
+                "weight_decay": 1e-3,
+                "momentum": 0.9,
+                "nesterov": True,
             },
             "discriminator": {
                 "lr": 0.001,
-                "weight_decay": 1e-8,
+                "weight_decay": 1e-5,
+                "momentum": 0.9,
+                "nesterov": True,
             },
         },
     },
@@ -137,6 +145,7 @@ TRAINER_PARAMETERS = {
             "base_lr": 1e-3,
             "max_lr": 1e-2,
             "step_size_up": 1000,
+            "cycle_momentum": False,
         },
         "adversarial": {
             "sites": {
@@ -158,19 +167,25 @@ TRAINER_PARAMETERS = {
                 "type": "mse",
                 "inputs": ["sh_fake", "sh", "mask"],
                 "parameters": {},
-                "coeff": 10,
+                "coeff": 1.,
             },
             {
                 "type": "mse",
                 "inputs": ["dwi_fake", "dwi", "mask"],
                 "parameters": {},
-                "coeff": 1e-3,
+                "coeff": 1e-4,
             },
             {
                 "type": "mse",
                 "inputs": ["mean_b0_fake", "mean_b0", "mask"],
                 "parameters": {},
-                "coeff": 10,
+                "coeff": 10.,
+            },
+            {
+                "type": "mse",
+                "inputs": ["fa_fake", "fa", "mask"],
+                "parameters": {},
+                "coeff": 10.,
             },
             # {
             #     "type": "l2_reg",
@@ -178,18 +193,18 @@ TRAINER_PARAMETERS = {
             #     "parameters": {},
             #     "coeff": 1e-4,
             # },
-            {
-                "type": "smooth_reg",
-                "inputs": ["alpha"],
-                "parameters": {},
-                "coeff": 1.,
-            },
-            {
-                "type": "smooth_reg",
-                "inputs": ["beta"],
-                "parameters": {},
-                "coeff": 1.,
-            },
+            # {
+            #     "type": "smooth_reg",
+            #     "inputs": ["alpha"],
+            #     "parameters": {},
+            #     "coeff": 1.,
+            # },
+            # {
+            #     "type": "smooth_reg",
+            #     "inputs": ["beta"],
+            #     "parameters": {},
+            #     "coeff": 1.,
+            # },
         ],
         "style": [],
         "adversarial": {
@@ -251,51 +266,61 @@ style_trainer = StyleTrainer(
 
 # Train both networks each epoch
 
-sites_net, adv_metrics = style_trainer.train_adversarial_net(
+nets, adv_metrics = style_trainer.train_adversarial_net(
     ['sites'],
     train_dataset,
     validation_dataset,
-    num_epochs=50,
+    num_epochs=60,
     batch_size=32,
     validation=True)
-sites_net = sites_net['sites']
+sites_net = nets['sites']
 
-sites_net, adv_metrics = style_trainer.train_adversarial_net(
-    ['discriminator'],
-    train_dataset,
-    validation_dataset,
-    num_epochs=1,
-    batch_size=16,
-    validation=True)
-discriminator_net = sites_net['discriminator']
+# nets, adv_metrics = style_trainer.train_adversarial_net(
+#     [],
+#     train_dataset,
+#     validation_dataset,
+#     num_epochs=1,
+#     train_net_X_time=1,
+#     batch_size=8,
+#     validation=True)
+# net = style_trainer.net
 
-sites_net_pred = style_trainer.adversarial_net['sites'].predict_dataset(
-    validation_dataset)
+# nets, adv_metrics = style_trainer.train_adversarial_net(
+#     ['discriminator'],
+#     train_dataset,
+#     validation_dataset,
+#     num_epochs=5,
+#     batch_size=16,
+#     validation=True)
+# discriminator_net = nets['discriminator']
 
 
-def flatten_dict(dic):
-    return {k: np.concatenate([v[k] for v in dic.values()])
-            for k in dic[list(dic.keys())[0]]}
+# sites_net_pred = style_trainer.adversarial_net['sites'].predict_dataset(
+#     validation_dataset)
 
 
-validation_features = flatten_dict(sites_net_pred)
+# def flatten_dict(dic):
+#     return {k: np.concatenate([v[k] for v in dic.values()])
+#             for k in dic[list(dic.keys())[0]]}
 
-# target_layers = [name for name in validation_features.keys() if "feat" in name]
-target_layers = ['dense_feat_1',
-                 'conv_feat_2',
-                 'conv_feat_3']
 
-target_features = {layer + '_fake_sites': np.mean(validation_features[layer],
-                                                  axis=0)[None]
-                   for layer in target_layers}
-layers_coeff = {name: 1 / len(target_layers) for name in target_layers}
-print(target_layers)
+# validation_features = flatten_dict(sites_net_pred)
+
+# # target_layers = [name for name in validation_features.keys() if "feat" in name]
+# target_layers = ['dense_feat_1',
+#                  'conv_feat_2',
+#                  'conv_feat_3']
+
+# target_features = {layer: np.mean(validation_features[layer], axis=0)[None]
+#                    for layer in target_layers}
+# layers_coeff = {name: 1 / len(target_layers) for name in target_layers}
+# print(target_layers)
 
 style_losses = []
 
 # style_losses += [
 #     {"type": "gram",
-#      "inputs": [layer],
+#      "inputs": [layer + '_fake_sites'],
 #      "parameters": {"target_features": target_features[layer],
 #                     "layers_coeff": layers_coeff[layer]},
 #      "coeff": 1e5,
@@ -304,7 +329,7 @@ style_losses = []
 
 # style_losses += [
 #     {"type": "feature",
-#      "inputs": [layer],
+#      "inputs": [layer + '_fake_sites'],
 #      "parameters": {"target_features": target_features[layer],
 #                     "layers_coeff": layers_coeff[layer]},
 #      "coeff": 10.,
@@ -315,14 +340,14 @@ style_losses += [
     {
         "type": "cross_entropy",
         "inputs": ["y_logits_fake_sites", "site"],
-        "parameters": {},
+        "parameters": {"smoothing": 0.1},
         "coeff": -100.,
     },
     {
         "type": "bce_logits_ones",
         "inputs": ["y_logits_fake_discriminator"],
         "parameters": {},
-        "coeff": -100.,
+        "coeff": 20.,
     }
 ]
 
@@ -346,12 +371,12 @@ style_trainer.set_style_loss(style_losses)
 style_trainer.set_adversarial_loss(
     {'sites':
         [
-            {
-                "type": "cross_entropy",
-                "inputs": ["y_logits", "site"],
-                "parameters": {},
-                "coeff": 1,
-            },
+            # {
+            #     "type": "cross_entropy",
+            #     "inputs": ["y_logits", "site"],
+            #     "parameters": {"smoothing": 0.1},
+            #     "coeff": 1,
+            # },
             {
                 "type": "cross_entropy",
                 "inputs": ["y_logits_fake", "site"],
@@ -370,17 +395,19 @@ style_trainer.set_adversarial_metric(
      }
 )
 
-nets, metrics = style_trainer.train_adversarial_net(
+best_nets, metrics = style_trainer.train_adversarial_net(
     ["sites", "discriminator"],
     train_dataset,
     validation_dataset,
     train_net_X_time=1,
-    num_epochs=20,
+    num_epochs=60,
     batch_size=8,
-    validation=True)
-net = nets['autoencoder']
-sites_net = nets['sites']
-discriminator_net = nets['discriminator']
+    keep_best_net=False)
+
+
+net = style_trainer.net
+sites_net = style_trainer.adversarial_net['sites']
+discriminator_net = style_trainer.adversarial_net['discriminator']
 
 test_dataset = SHDataset(path_test,
                          patch_size=SIGNAL_PARAMETERS["patch_size"],
@@ -394,11 +421,25 @@ test_dataset = SHDataset(path_test,
                          n_jobs=8,
                          cache_dir="./")
 
+generated_dataset = AdversarialDataset(test_dataset,
+                                       style_trainer.net,
+                                       batch_size=16)
+generated_dataset.names = [x for x in generated_dataset.names if 'fake' in x]
+
+style_trainer.set_adversarial_metric(
+    {"sites": [
+        {
+            "type": "accuracy",
+                    "inputs": ["site", "y_logits"],
+                    "use_fake": False,
+        }],
+     }
+)
 
 metrics_real = style_trainer.validate_adversarial(
     'sites',
-    test_dataset,
-    force_use_fake=True)
+    generated_dataset,
+    batch_size=16)
 
 print('metrics_real:', metrics_real)
 
@@ -436,19 +477,15 @@ sites_net_test, _ = style_trainer_test.train_adversarial_net(
     ['sites'],
     train_dataset,
     validation_dataset,
-    num_epochs=20,
+    num_epochs=40,
     batch_size=8,
     validation=True)
 
 sites_net_test = sites_net_test['sites']
 
-generated_dataset = AdversarialDataset(test_dataset, style_trainer_test.net,
-                                       batch_size=16)
-generated_dataset.names = [x for x in generated_dataset.names if 'fake' in x]
-
 metrics_fake = style_trainer_test.validate_adversarial(
-    ['sites'],
+    'sites',
     generated_dataset,
-    force_use_fake=True)
+    batch_size=16)
 
 print('metrics_fake:', metrics_fake)

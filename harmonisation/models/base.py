@@ -22,7 +22,7 @@ class BaseNet(nn.Module, object):
     def __init__(self, **kwargs):
         super(BaseNet, self).__init__()
 
-        # Keep all the __init__parameters for saving/loading
+        # Keep all the __init__ parameters for saving/loading
         self.net_parameters = kwargs
 
     @property

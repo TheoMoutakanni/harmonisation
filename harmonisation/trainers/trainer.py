@@ -15,6 +15,17 @@ from harmonisation.datasets.utils import batch_to_xyz
 import matplotlib.pyplot as plt
 
 
+class Iterator():
+    def __init__(self):
+        self.iterator = 0
+
+    def get_iter(self):
+        return self.iterator
+
+    def step(self):
+        self.iterator += 1
+
+
 class BaseTrainer():
     def __init__(self,
                  net,
@@ -95,6 +106,15 @@ class BaseTrainer():
                                                    inputs['mask'])
 
         return inputs
+
+        # if input_needed not in inputs.keys():
+        #     if input_needed in nets_dict['autoencoder'].outputs:
+        #         net = nets_dict['autoencoder']
+        #         inputs.update(net(**{name: inputs[name]
+        #                              for name in net.inputs}))
+
+        #     for net_name in nets_dict.keys():
+        #         if net_name in input_name:
 
     def get_batch_loss(self, inputs):
         """ Single forward and backward pass """

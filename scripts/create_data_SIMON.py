@@ -17,7 +17,7 @@ import tqdm
 remove_border = None
 
 save_folder = "./.saved_models/style_test/"
-net_file = '46_net.tar.gz'
+net_file = 'autoencoder_49.tar.gz'
 
 SIGNAL_PARAMETERS['overlap_coeff'] = 2
 # SIGNAL_PARAMETERS['patch_size'] = [32, 32, 32]
@@ -82,9 +82,9 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
     net_pred = net.predict_dataset(dataset,
                                    batch_size=1,
                                    numpy=False)[dwi_name]
-    sh_pred = net_pred['sh_pred']
-    mean_b0_pred = net_pred['mean_b0_pred']
-    alpha = net_pred['alpha']
+    sh_pred = net_pred['sh_fake']
+    mean_b0_pred = net_pred['mean_b0_fake']
+    # alpha = net_pred['alpha']
     beta = net_pred['beta']
 
     sh_pred = batch_to_xyz(
@@ -103,12 +103,12 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
         remove_border=remove_border).numpy()
     mean_b0_pred = mean_b0_pred * dataset.b0_std + dataset.b0_mean
 
-    alpha = batch_to_xyz(
-        alpha,
-        data['real_size'],
-        empty=data['empty'],
-        overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
-        remove_border=remove_border).numpy()
+    # alpha = batch_to_xyz(
+    #     alpha,
+    #     data['real_size'],
+    #     empty=data['empty'],
+    #     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
+    #     remove_border=remove_border).numpy()
 
     beta = batch_to_xyz(
         beta,
@@ -145,7 +145,7 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
                  pad_needed[2][0]:-pad_needed[2][1]]
     dwi_pred = pad(dwi_pred, pad_needed)
     sh_pred = pad(sh_pred, pad_needed)
-    alpha = pad(alpha, pad_needed)
+    # alpha = pad(alpha, pad_needed)
     beta = pad(beta, pad_needed)
     mean_b0_pred = pad(mean_b0_pred, pad_needed)
     mask = pad(mask, pad_needed)
@@ -157,7 +157,7 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
     dwi_pred = temp
 
     dwi_pred *= mask
-    alpha *= mask
+    # alpha *= mask
     beta *= mask
 
     if not os.path.exists(dir_name):
@@ -166,5 +166,5 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
     # save_nifti(os.path.join(dir_name, "sh_true.nii.gz"), sh_true, affine)
     save_nifti(os.path.join(dir_name, "sh_pred.nii.gz"), sh_pred, affine)
     save_nifti(os.path.join(dir_name, "dwi_pred.nii.gz"), dwi_pred, affine)
-    save_nifti(os.path.join(dir_name, "alpha.nii.gz"), alpha, affine)
+    # save_nifti(os.path.join(dir_name, "alpha.nii.gz"), alpha, affine)
     save_nifti(os.path.join(dir_name, "beta.nii.gz"), beta, affine)

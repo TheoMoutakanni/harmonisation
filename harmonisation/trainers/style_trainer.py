@@ -7,13 +7,11 @@ import numpy as np
 import copy
 from tqdm import tqdm
 
-import matplotlib.pyplot as plt
-
 from harmonisation.functions.metrics import get_metric_fun
 from harmonisation.functions.losses import get_loss_fun
 from harmonisation.datasets import AdversarialDataset
 
-from .trainer import BaseTrainer
+from .trainer import BaseTrainer, Iterator
 
 
 class StyleTrainer(BaseTrainer):
@@ -80,8 +78,8 @@ class StyleTrainer(BaseTrainer):
         self.style_losses = get_loss_fun(loss_specs["style"], self.net.device)
         self.optimizer = optim.Adam(
             self.net.parameters(), **optimizer_parameters["autoencoder"])
-        # self.scheduler = optim.lr_scheduler.CyclicLR(
-        #     self.optimizer, **scheduler_parameters["autoencoder"])
+        self.scheduler = optim.lr_scheduler.CyclicLR(
+            self.optimizer, **scheduler_parameters["autoencoder"])
 
         self.adv_metric_to_maximize = metric_to_maximize["adversarial"]
         self.adversarial_metrics = {
@@ -98,6 +96,8 @@ class StyleTrainer(BaseTrainer):
                 self.adversarial_optimizer[name], **params)
             for name, params in scheduler_parameters["adversarial"].items()
         }
+        self.nb_step = {name: 0 for name in self.adversarial_net}
+        self.nb_step['autoencoder'] = 0
 
         self.modules = modules
 
@@ -123,24 +123,16 @@ class StyleTrainer(BaseTrainer):
                 metric_specs)
 
     def validate_adversarial(self, net_name, dataset,
-                             batch_size=128, force_use_fake=False):
+                             batch_size=128):
         """
         Compute metrics on validation_dataset and print some metrics
         """
-        use_fake = any(self.adversarial_metrics[net_name][name]["use_fake"]
-                       for name in self.adversarial_metrics[net_name])
-        use_fake = use_fake or force_use_fake
-        if use_fake:
-            feat_dataset = AdversarialDataset(dataset, self.net,
-                                              batch_size=batch_size)
-        else:
-            feat_dataset = dataset
 
-        data = {name: feat_dataset.get_data_by_name(name)
-                for name in feat_dataset.names}
+        data = {name: dataset.get_data_by_name(name)
+                for name in dataset.names}
 
         net_pred = self.adversarial_net[net_name].predict_dataset(
-            feat_dataset,
+            dataset,
             batch_size=batch_size)
 
         metrics_batches = []
@@ -217,7 +209,7 @@ class StyleTrainer(BaseTrainer):
     def get_batch_loss(self, inputs):
         """ Get the loss + adversarial loss for the autoencoder
         Single forward and backward pass """
-        #inputs = inputs.copy()
+        inputs = inputs.copy()
 
         if 'site' in inputs.keys():
             inputs['site'] = inputs['site'].squeeze(-1)
@@ -253,9 +245,11 @@ class StyleTrainer(BaseTrainer):
             loss = loss_d['coeff'] * loss
             batch_loss_reconst.append(loss)
             loss_dict[loss_d['type'] + '_' + loss_d['inputs'][0]] = loss
-        batch_loss_reconst = torch.stack(batch_loss_reconst, dim=0).sum()
-
-        loss_dict['reconst_loss'] = batch_loss_reconst
+        if len(self.losses) != 0:
+            batch_loss_reconst = torch.stack(batch_loss_reconst, dim=0).sum()
+            loss_dict['reconst_loss'] = batch_loss_reconst
+        else:
+            batch_loss_reconst = 0
 
         batch_loss_style = []
         for loss_d in self.style_losses:
@@ -357,7 +351,7 @@ class StyleTrainer(BaseTrainer):
                     loss = batch_losses['batch_loss']
                     loss.backward()
                     self.optimizer.step()
-                    # self.scheduler.step()
+                    self.scheduler.step()
                     for name, loss in batch_losses.items():
                         loss = loss.item()
                         loss /= float(train_net_X_time)
@@ -392,9 +386,11 @@ class StyleTrainer(BaseTrainer):
                 # self.net.plot_grad_flow()
 
             for net_name in epoch_loss_train.keys():
+                self.nb_step[net_name] += 1
                 for name, loss in epoch_loss_train[net_name].items():
-                    self.writer.add_scalar('loss/' + net_name + '/' + name,
-                                           loss / (i + 1.), epoch)
+                    self.writer.add_scalar(net_name + '/loss/' + name,
+                                           loss / (i + 1.),
+                                           self.nb_step[net_name])
                     epoch_loss_train[net_name][name] = loss / (i + 1.)
 
             with torch.no_grad():
@@ -402,37 +398,53 @@ class StyleTrainer(BaseTrainer):
                     metrics_epoch['autoencoder'] = self.validate(
                         validation_dataset, batch_size)
                     for name, metric in metrics_epoch['autoencoder'].items():
-                        self.writer.add_scalar('metric/autoencoder/' + name + '_val',
-                                               metric, epoch)
+                        self.writer.add_scalar('autoencoder/metric/' + name + '_val',
+                                               metric,
+                                               self.nb_step['autoencoder'])
+
+                use_fake = any(
+                    self.adversarial_metrics[net_name][name]["use_fake"]
+                    for net_name in nets_list
+                    for name in self.adversarial_metrics[net_name])
+                if use_fake:
+                    feat_dataset = AdversarialDataset(validation_dataset,
+                                                      self.net,
+                                                      batch_size=batch_size)
 
                 for net_name in nets_list:
+                    use_fake = any(
+                        self.adversarial_metrics[net_name][name]["use_fake"]
+                        for name in self.adversarial_metrics[net_name])
                     metrics_epoch[net_name] = self.validate_adversarial(
                         net_name,
-                        validation_dataset,
-                        batch_size=batch_size,
-                        force_use_fake=False)
+                        validation_dataset if not use_fake else feat_dataset,
+                        batch_size=batch_size)
 
                     # metrics_train_epoch[net_name] = self.validate_adversarial(
                     #     net_name,
                     #     train_dataset,
-                    #     batch_size=batch_size,
-                    #     force_use_fake=False)
+                    #     batch_size=batch_size)
 
                     for name, metric in metrics_epoch[net_name].items():
-                        self.writer.add_scalar('metric/' + net_name + '/' + name + '_val',
-                                               metric, epoch)
+                        self.writer.add_scalar(net_name + '/metric/' + name + '_val',
+                                               metric,
+                                               self.nb_step[net_name])
                     # for name, metric in metrics_train_epoch[net_name].items():
                     #     self.writer.add_scalar('metric/' + net_name + '/' + name + '_train',
-                    #                            metric, epoch)
+                    #                            metric,
+                    #                            self.nb_step[net_name])
+                feat_dataset = None
 
             if self.save_folder:
                 if train_net_X_time > 0:
                     file_name = self.save_folder + 'autoencoder'
-                    file_name = file_name + "_" + str(epoch) + ".tar.gz"
+                    file_name = "{}_{}.tar.gz".format(
+                        file_name, str(self.nb_step['autoencoder']))
                     self.net.save(file_name)
                 for net_name in nets_list:
                     file_name = self.save_folder + net_name
-                    file_name = file_name + "_" + str(epoch) + ".tar.gz"
+                    file_name = "{}_{}.tar.gz".format(
+                        file_name, str(self.nb_step[net_name]))
                     self.adversarial_net[net_name].save(file_name)
 
             if train_net_X_time > 0:
@@ -444,6 +456,9 @@ class StyleTrainer(BaseTrainer):
                 actual_value = metrics_epoch['autoencoder'][metric_name]
                 if actual_value > best_value['autoencoder']:
                     best_value['autoencoder'] = actual_value
+                    for net_name in nets_list:
+                        best_value[net_name] = metrics_epoch[net_name][
+                            self.adv_metric_to_maximize[net_name]]
                     last_update = epoch
                     metrics_final = metrics_epoch
                     best_net['autoencoder'] = copy.deepcopy(self.net)
