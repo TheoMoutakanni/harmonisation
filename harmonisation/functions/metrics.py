@@ -1,7 +1,14 @@
 import numpy as np
 import torch
+import torch.nn as nn
 
 import dipy.reconst.dti as dti
+
+from dipy.data import get_sphere
+from dipy.reconst.shm import (sph_harm_ind_list, cart2sphere, real_sph_harm,
+                              sh_to_rh, forward_sdeconv_mat)
+
+from harmonisation.functions import shm
 
 
 def nanmean(v, inplace=False, *args, **kwargs):
@@ -16,29 +23,50 @@ def torch_norm(vect):
     return torch.sqrt(torch.sum(vect**2, axis=-1))
 
 
-def torch_angular_corr_coeff(sh_U, sh_V):
-    assert sh_U.shape[-1] == sh_V.shape[-1], "SH orders must be the same"
+class AngularCorrCoeff(nn.Module):
+    def __init__(self):
+        super(AngularCorrCoeff, self).__init__()
 
-    acc = torch.sum(sh_U * sh_V, axis=-1) / \
-        (torch_norm(sh_U) * torch_norm(sh_V))
+    def forward(self, sh_U, sh_V, mask=None):
+        if mask is not None:
+            sh_U = sh_U * mask
+            sh_V = sh_V * mask
+        acc = torch.sum(sh_U * sh_V, axis=-1) / \
+            (torch_norm(sh_U) * torch_norm(sh_V))
+        return acc
 
-    return acc
+
+def weighted_mse(X, Z, weight):
+    mse = (X - Z)**2
+    mse = mse * weight.expand_as(mse)
+    return torch.sum(mse) / torch.sum(weight)
 
 
-def weighted_mse_loss(X, Z, weight, axis=-1):
-    return torch.sum(weight * (X - Z) ** 2, axis=axis) / torch.sum(weight)
+class NegativeWeightedMSE(nn.Module):
+    def __init__(self):
+        super(NegativeWeightedMSE, self).__init__()
+
+    def forward(self, X, Z, mask):
+        return -weighted_mse(X, Z, mask)
 
 
-def torch_accuracy(labels, logits):
-    if len(labels.shape) == 1:
-        labels = labels[None]
-    if logits.shape[1] > 1:
-        predicted = torch.argmax(logits, dim=1)
-    else:
-        proba = torch.sigmoid(logits)
-        predicted = (proba >= 0.5).float()
-    accuracy = (predicted == labels).float().mean()
-    return accuracy
+class Accuracy(nn.Module):
+    def __init__(self, force_label=None):
+        super(Accuracy, self).__init__()
+        self.force_label = force_label
+
+    def forward(self, logits, labels=None):
+        if self.force_label is not None:
+            labels = self.force_label
+        elif len(labels.shape) == 1:
+            labels = labels[None]
+        if logits.shape[1] > 1:
+            predicted = torch.argmax(logits, dim=1)
+        else:
+            proba = torch.sigmoid(logits)
+            predicted = (proba >= 0.5).float()
+        accuracy = (predicted == labels).float().mean()
+        return accuracy
 
 
 def torch_RIS(X):
@@ -50,11 +78,15 @@ def torch_RIS(X):
     return torch.stack(RIS).permute(*range(1, len(X.shape)), 0)
 
 
-def torch_mse_RIS(X, Z, weight):
-    X_RIS = torch_RIS(X)
-    Z_RIS = torch_RIS(Z)
-    mse_RIS = weighted_mse_loss(X_RIS, Z_RIS, weight, axis=-1)
-    return mse_RIS
+class NegativeRISMSE(nn.Module):
+    def __init__(self):
+        super(NegativeRISMSE, self).__init__()
+
+    def forward(self, X_sh, Z_sh, mask):
+        X_RIS = torch_RIS(X_sh)
+        Z_RIS = torch_RIS(Z_sh)
+        mse_RIS = weighted_mse_loss(X_RIS, Z_RIS, weight)
+        return -mse_RIS
 
 
 def torch_gfa(X):
@@ -72,11 +104,15 @@ def torch_gfa(X):
     return torch.sqrt(1. - (numer / denom))
 
 
-def torch_mse_gfa(X, Z, weight):
-    X_gfa = torch_gfa(X)
-    Z_gfa = torch_gfa(Z)
-    mse_gfa = weighted_mse_loss(X_gfa, Z_gfa, weight.squeeze())
-    return mse_gfa
+class NegativeGfaMSE(nn.Module):
+    def __init__(self):
+        super(NegativeGfaMSE, self).__init__()
+
+    def forward(self, X_sh, Z_sh, mask):
+        X_gfa = torch_gfa(X_sh)
+        Z_gfa = torch_gfa(Z_sh)
+        mse_gfa = weighted_mse_loss(X_gfa, Z_gfa, weight.squeeze())
+        return -mse_gfa
 
 
 def torch_anisotropic_power(sh_coeffs, norm_factor=0.00001, power=2,
@@ -120,92 +156,15 @@ def torch_anisotropic_power(sh_coeffs, norm_factor=0.00001, power=2,
     return log_ap
 
 
-def torch_mse_anisotropic_power(X, Z, weight):
-    X_ap = torch_anisotropic_power(X)
-    Z_ap = torch_anisotropic_power(Z)
-    mse_ap = weighted_mse_loss(X_ap, Z_ap, weight.squeeze())
-    return mse_ap
+class NegativeAPMSE(nn.Module):
+    def __init__(self):
+        super(NegativeAPMSE, self).__init__()
 
-
-def ols_fit_tensor(data, gtab=None, design_matrix=None,
-                   design_matrix_inv=None):
-    r"""
-    Computes ordinary least squares (OLS) fit to calculate self-diffusion
-    tensor using a linear regression model [1]_.
-    Parameters
-    ----------
-    design_matrix : array (g, 7)
-        Design matrix holding the covariants used to solve for the regression
-        coefficients.
-    data : array ([X, Y, Z, ...], g)
-        Data or response variables holding the data. Note that the last
-        dimension should contain the data. It makes no copies of data.
-    return_S0_hat : bool
-        Boolean to return (True) or not (False) the S0 values for the fit.
-    Returns
-    -------
-    eigvals : array (..., 3)
-        Eigenvalues from eigen decomposition of the tensor.
-    eigvecs : array (..., 3, 3)
-        Associated eigenvectors from eigen decomposition of the tensor.
-        Eigenvectors are columnar (e.g. eigvecs[:,j] is associated with
-        eigvals[j])
-    """
-
-    assert (gtab is not None) or (
-        design_matrix is not None), "must give gtab or design_matrix"
-
-    if design_matrix is None:
-        design_matrix = dti.design_matrix(gtab)
-        design_matrix = torch.FloatTensor(design_matrix)
-
-    if design_matrix_inv is None:
-        design_matrix_inv = torch.FloatTensor(np.linalg.pinv(design_matrix))
-        design_matrix_inv = design_matrix_inv
-
-    design_matrix = design_matrix.to(data.device)
-    design_matrix_inv = design_matrix_inv.to(data.device)
-
-    tol = 1e-6
-    fit_result = torch.einsum('ij,...j',
-                              design_matrix_inv,
-                              torch.log(data))
-
-    min_diffusivity = tol / -design_matrix.min()
-
-    _lt_indices = np.array([[0, 1, 3],
-                            [1, 2, 4],
-                            [3, 4, 5]])
-    eigenvals, eigenvecs = torch.symeig(fit_result[..., _lt_indices],
-                                        eigenvectors=True,
-                                        upper=True)
-
-    # need to sort the eigenvalues and associated eigenvectors
-    if eigenvals.ndim == 1:
-        # this is a lot faster when dealing with a single voxel
-        order = torch.flip(eigenvals.argsort(), dims=(0,))  # [::-1]
-        eigenvecs = eigenvecs[:, order]
-        eigenvals = eigenvals[order]
-    else:
-        # temporarily flatten eigenvals and eigenvecs to make sorting easier
-        shape = eigenvals.shape[:-1]
-        eigenvals = eigenvals.reshape(-1, 3)
-        eigenvecs = eigenvecs.reshape(-1, 3, 3)
-        size = eigenvals.shape[0]
-        order = torch.flip(eigenvals.argsort(), dims=(1,))  # [:, ::-1]
-        xi, yi = np.ogrid[:size, :3, :3][:2]
-        eigenvecs = eigenvecs[xi, yi, order[:, None, :]]
-        xi = np.ogrid[:size, :3][0]
-        eigenvals = eigenvals[xi, order]
-        eigenvecs = eigenvecs.reshape(shape + (3, 3))
-        eigenvals = eigenvals.reshape(shape + (3, ))
-    eigenvals = eigenvals.clamp(min=min_diffusivity)
-    # eigenvecs: each vector is columnar
-
-    dti_params = torch.cat((eigenvals[..., None, :], eigenvecs), dim=-2)
-    eigs = dti_params.reshape(data.shape[:-1] + (12, ))
-
-    return eigs
+    def forward(self, X_sh, Z_sh, mask):
+        X_ap = torch_anisotropic_power(X_sh)
+        Z_ap = torch_anisotropic_power(Z_sh)
+        mse_ap = weighted_mse_loss(X_ap, Z_ap, weight.squeeze())
+        return -mse_ap
 
 
 def torch_fa(evals):
@@ -219,26 +178,73 @@ def torch_fa(evals):
     return fa
 
 
+class NumberSmallfODF(nn.Module):
+    def __init__(self, gtab, response, sh_order, lambda_=1, tau=0.1):
+        super(NumberSmallfODF, self).__init__()
+
+        m, n = sph_harm_ind_list(sh_order)
+
+        # x, y, z = gtab.gradients[~gtab.b0s_mask].T
+        # r, theta, phi = cart2sphere(x, y, z)
+        # self.B_dwi = real_sph_harm(m, n, theta[:, None], phi[:, None])
+        self.B_dwi = shm.get_B_matrix(gtab, sh_order)
+
+        self.sphere = get_sphere('symmetric362')
+
+        r, theta, phi = cart2sphere(
+            self.sphere.x,
+            self.sphere.y,
+            self.sphere.z
+        )
+        self.B_reg = real_sph_harm(m, n, theta[:, None], phi[:, None])
+
+        S_r = shm.estimate_response(gtab, response[0:3], response[3])
+        r_sh = np.linalg.lstsq(self.B_dwi, S_r[~gtab.b0s_mask], rcond=-1)[0]
+        n_response = n
+        m_response = m
+        r_rh = sh_to_rh(r_sh, m_response, n_response)
+        R = forward_sdeconv_mat(r_rh, n)
+
+        # scale lambda_ to account for differences in the number of
+        # SH coefficients and number of mapped directions
+        # This is exactly what is done in [4]_
+        lambda_ = (lambda_ * R.shape[0] * r_rh[0] /
+                   (np.sqrt(self.B_reg.shape[0]) * np.sqrt(362.)))
+        self.B_reg = self.B_reg * lambda_
+        self.B_reg = nn.Parameter(torch.FloatTensor(self.B_reg),
+                                  requires_grad=False)
+
+        self.tau = tau
+
+    def forward(self, fodf_sh, mask):
+        threshold = self.B_reg[0, 0] * self.tau * fodf_sh[..., 0:1]
+        fodf = torch.einsum("...i,ij", fodf_sh, self.B_reg.T)
+        p = torch.sum((fodf < threshold) * mask) / torch.sum(mask)
+        return p
+
+
 def get_metric_dict():
     """Return a dict with all the metrics to be computed during an epoch
     Metrics must be greater when better, so -mse instead of mse for example"""
     return {
-        'acc': lambda x, z, mask: torch_angular_corr_coeff(x * mask, z * mask),
-        'mse': lambda x, z, mask: -weighted_mse_loss(x, z, mask),
-        'mse_RIS': lambda x, z, mask: -torch_mse_RIS(x, z, mask),
-        'mse_gfa': lambda x, z, mask: -torch_mse_gfa(x, z, mask),
-        'mse_ap': lambda x, z, mask: -torch_mse_anisotropic_power(x, z, mask),
+        'acc': AngularCorrCoeff,
+        'mse': NegativeWeightedMSE,
+        'mse_RIS': NegativeRISMSE,
+        'mse_gfa': NegativeGfaMSE,
+        'mse_ap': NegativeAPMSE,
 
-        'accuracy': lambda labels, proba: torch_accuracy(labels, proba),
+        'accuracy': Accuracy,
+        'small_fodf': NumberSmallfODF,
     }
 
 
-def get_metric_fun(metric_specs):
+def get_metric_fun(metric_specs, device):
     metric_dict = get_metric_dict()
-    metrics = {
-        specs['type']: {
-            'fun': metric_dict[specs['type']],
-            'inputs': specs['inputs'],
-            'use_fake': specs['use_fake']}
-        for specs in metric_specs}
+    metrics = {}
+    for specs in metric_specs:
+        d = dict()
+        d['fun'] = metric_dict[specs["type"]](**specs["parameters"]).to(device)
+        d['inputs'] = specs['inputs']
+        d['type'] = specs['type']
+        metrics[specs['type'] + '_' + specs['inputs'][0]] = d
     return metrics

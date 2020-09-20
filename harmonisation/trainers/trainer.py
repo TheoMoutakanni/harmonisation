@@ -14,6 +14,8 @@ from harmonisation.datasets.utils import batch_to_xyz
 
 import matplotlib.pyplot as plt
 
+from harmonisation.utils import compute_modules
+
 
 class Iterator():
     def __init__(self):
@@ -61,8 +63,15 @@ class BaseTrainer():
         """
         data_true = {name: validation_dataset.get_data_by_name(name)
                      for name in validation_dataset.names}
+
+        inputs_needed = [
+            x for metric_d in self.metrics.values()
+            for x in metric_d['inputs']]
+
         data_fake = self.net.predict_dataset(validation_dataset,
-                                             batch_size=batch_size)
+                                             inputs_needed,
+                                             batch_size=batch_size,
+                                             modules=self.modules)
         metrics_fun = metrics.get_metric_dict()
 
         metrics_batches = []
@@ -92,29 +101,74 @@ class BaseTrainer():
 
         return metrics_epoch
 
-    def compute_modules(self, inputs_needed, inputs):
-        if 'dwi' in inputs_needed and 'dwi' not in inputs.keys():
-            inputs['dwi'] = self.modules['dwi'](inputs['sh'],
-                                                inputs['mean_b0'])
-        if 'dwi_fake' in inputs_needed and 'dwi_fake' not in inputs.keys():
-            inputs['dwi_fake'] = self.modules['dwi'](inputs['sh_fake'],
-                                                     inputs['mean_b0_fake'])
-        if 'fa' in inputs_needed and 'fa' not in inputs.keys():
-            inputs['fa'] = self.modules['fa'](inputs['dwi'], inputs['mask'])
-        if 'fa_fake' in inputs_needed and 'fa_fake' not in inputs.keys():
-            inputs['fa_fake'] = self.modules['fa'](inputs['dwi_fake'],
-                                                   inputs['mask'])
+    def compute_modules(self, input_needed, inputs, nets_dict, modules):
+        # if 'dwi' in inputs_needed and 'dwi' not in inputs.keys():
+        #     inputs['dwi'] = self.modules['dwi'](inputs['sh'],
+        #                                         inputs['mean_b0'])
+        # if 'dwi_fake' in inputs_needed and 'dwi_fake' not in inputs.keys():
+        #     inputs['dwi_fake'] = self.modules['dwi'](inputs['sh_fake'],
+        #                                              inputs['mean_b0_fake'])
+        # if 'fa' in inputs_needed and 'fa' not in inputs.keys():
+        #     inputs['fa'] = self.modules['fa'](inputs['dwi'], inputs['mask'])
+        # if 'fa_fake' in inputs_needed and 'fa_fake' not in inputs.keys():
+        #     inputs['fa_fake'] = self.modules['fa'](inputs['dwi_fake'],
+        #                                            inputs['mask'])
 
-        return inputs
+        # return inputs
 
-        # if input_needed not in inputs.keys():
-        #     if input_needed in nets_dict['autoencoder'].outputs:
-        #         net = nets_dict['autoencoder']
-        #         inputs.update(net(**{name: inputs[name]
-        #                              for name in net.inputs}))
+        if input_needed not in inputs.keys():
+            if any([input_needed in x for x in modules.keys()]):
+                module_name = input_needed.split('_')[0]
+                net_inputs = modules[module_name].inputs
 
-        #     for net_name in nets_dict.keys():
-        #         if net_name in input_name:
+                if 'fake' in input_needed:
+                    net_inputs = [
+                        name + '_fake' if name not in ['mask'] else name
+                        for name in net_inputs]
+                    base_name = '{}_fake'
+                else:
+                    base_name = '{}'
+
+                for name in input_needed:
+                    inputs = compute_modules(
+                        name, inputs, nets_dict, modules)
+
+                output_name = base_name.format(input_needed)
+                inputs[output_name] = modules[module_name](
+                    **{name: inputs[name] for name in net_inputs})
+                return inputs
+
+            elif input_needed in nets_dict['autoencoder'].outputs:
+                net = nets_dict['autoencoder']
+                for name in net.inputs:
+                    inputs = compute_modules(
+                        name, inputs, nets_dict, modules)
+                return inputs.update(net(**{name: inputs[name]
+                                            for name in net.inputs}))
+            else:
+                for net_name in nets_dict.keys():
+                    if net_name in input_needed:
+                        net = nets_dict[net_name]
+                        break
+                net_inputs = net.inputs
+
+                if 'fake' in input_needed:
+                    net_inputs = [
+                        name + '_fake' if name not in ['mask'] else name
+                        for name in net_inputs]
+                    base_name = '{}_fake_{}'
+                else:
+                    base_name = '{}_{}'
+
+                for name in net_inputs:
+                    inputs = compute_modules(
+                        name, inputs, nets_dict, modules)
+                net_pred = net(**{name: inputs[name] for name in net.inputs})
+                return inputs.update(
+                    {base_name.format(name, net_name): net_pred[name]
+                     for name in net_pred.keys()})
+        else:
+            return inputs
 
     def get_batch_loss(self, inputs):
         """ Single forward and backward pass """
@@ -126,7 +180,8 @@ class BaseTrainer():
         inputs.update(net_pred)
 
         inputs_needed = [inp for loss in self.losses for inp in loss['inputs']]
-        inputs = self.compute_modules(inputs_needed, inputs)
+        inputs = compute_modules(
+            inputs_needed, inputs, {'autoencoder': self.net}, self.modules)
 
         batch_loss = []
         for loss_d in self.losses:

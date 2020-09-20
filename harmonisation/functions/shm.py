@@ -1,5 +1,7 @@
 from dipy.reconst.shm import cart2sphere, smooth_pinv
-from dipy.reconst.shm import real_sym_sh_basis, order_from_ncoef
+from dipy.reconst.shm import (real_sym_sh_basis, order_from_ncoef,
+                              sph_harm_ind_list, real_sph_harm,
+                              sh_to_rh, forward_sdeconv_mat)
 
 from scilpy.reconst.raw_signal import compute_sh_coefficients
 
@@ -24,10 +26,13 @@ def normalize_data(data, where_b0, min_signal=1e-5, out=None):
     return out
 
 
-def get_B_matrix(gtab, sh_order, smooth=0.006):
-    x, y, z = gtab.gradients[~gtab.b0s_mask].T
-    r, theta, phi = cart2sphere(x, y, z)
+def get_B_matrix(gtab=None, sh_order=8, theta=None, phi=None, smooth=0.006):
+    # m, n = sph_harm_ind_list(sh_order)
+    if theta is None or phi is None:
+        x, y, z = gtab.gradients[~gtab.b0s_mask].T
+        r, theta, phi = cart2sphere(x, y, z)
     B, m, n = real_sym_sh_basis(sh_order, theta[:, None], phi[:, None])
+    # B = real_sph_harm(m, n, theta[:, None], phi[:, None])
     L = -n * (n + 1)
     invB = smooth_pinv(B, np.sqrt(smooth) * L)
 
@@ -85,3 +90,40 @@ def sh_to_dwi(data_sh, gtab, mask=None, add_b0=True, smooth=0.006):
         data_dwi *= mask
 
     return data_dwi
+
+
+def estimate_response(gtab, evals, S0):
+    evecs = np.array([[0, 0, 1],
+                      [0, 1, 0],
+                      [1, 0, 0]])
+    out_shape = gtab.bvecs.shape[:gtab.bvecs.ndim - 1]
+    gradients = gtab.bvecs.reshape(-1, 3)
+
+    S = np.zeros(len(gradients))
+    D = np.dot(np.dot(evecs, np.diag(evals)), evecs.T)
+
+    for (i, g) in enumerate(gradients):
+        S[i] = S0 * np.exp(-gtab.bvals[i] * np.dot(np.dot(g.T, D), g))
+
+    return S.reshape(out_shape)
+
+
+def get_deconv_matrix(gtab, response, sh_order):
+    m, n = sph_harm_ind_list(sh_order)
+
+    # x, y, z = gtab.gradients[~gtab.b0s_mask].T
+    # r, theta, phi = cart2sphere(x, y, z)
+    # # for the gradient sphere
+    # B_dwi = real_sph_harm(m, n, theta[:, None], phi[:, None])
+    B_dwi, _ = get_B_matrix(gtab, sh_order)
+
+    S_r = estimate_response(gtab, response[0:3], response[3])
+    r_sh = np.linalg.lstsq(B_dwi, S_r[~gtab.b0s_mask], rcond=-1)[0]
+    n_response = n
+    m_response = m
+    r_rh = sh_to_rh(r_sh, m_response, n_response)
+    R = forward_sdeconv_mat(r_rh, n)
+
+    X = R.diagonal() * B_dwi
+
+    return R, r_rh, B_dwi

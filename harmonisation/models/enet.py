@@ -55,6 +55,7 @@ class PixelShuffle(nn.Module):
        Sub-Pixel Convolutional Neural Network:
        https://arxiv.org/abs/1609.05158
     """
+
     def __init__(self, upscale_factor: int):
         super(PixelShuffle, self).__init__()
         self.upscale_factor = upscale_factor
@@ -680,22 +681,22 @@ class ENet(BaseNet):
         self.conv6_2 = nn.Sequential(
             nn.Conv3d(
                 self.ncoef,
-                self.ncoef,
+                self.ncoef + 45,
                 kernel_size=5,
                 padding=2,
                 bias=True),
-            nn.BatchNorm3d(self.ncoef),
+            nn.BatchNorm3d(self.ncoef + 45),
             nn.ReLU(),
             nn.Conv3d(
-                self.ncoef,
-                self.ncoef,
+                self.ncoef + 45,
+                self.ncoef + 45,
                 kernel_size=1,
                 bias=True))
 
         self.convout_1 = nn.Sequential(
             nn.Conv3d(
                 embed[0],
-                self.ncoef,
+                self.ncoef + 45,
                 kernel_size=1,
                 bias=True),
             nn.Tanh(),
@@ -704,7 +705,7 @@ class ENet(BaseNet):
         self.convout_2 = nn.Sequential(
             nn.Conv3d(
                 embed[1],
-                self.ncoef,
+                self.ncoef + 45,
                 kernel_size=1,
                 bias=True),
             nn.Tanh(),
@@ -713,7 +714,7 @@ class ENet(BaseNet):
         self.convout_3 = nn.Sequential(
             nn.Conv3d(
                 embed[2],
-                self.ncoef,
+                self.ncoef + 45,
                 kernel_size=1,
                 bias=True),
             nn.Tanh(),
@@ -722,7 +723,7 @@ class ENet(BaseNet):
         self.convout_4 = nn.Sequential(
             nn.Conv3d(
                 embed[3],
-                self.ncoef,
+                self.ncoef + 45,
                 kernel_size=1,
                 bias=True),
             nn.Tanh(),
@@ -732,7 +733,6 @@ class ENet(BaseNet):
 
     def forward(self, sh, mean_b0):
         # Initial block
-
         inputs = torch.cat([mean_b0, sh], dim=-1)
 
         x = inputs.permute((0, 4, 1, 2, 3))
@@ -808,8 +808,8 @@ class ENet(BaseNet):
         x_final = (x + x_out_1 + x_out_2 + x_out_3 + x_out_4) / 5.
         x_final = x_final.permute((0, 2, 3, 4, 1))
 
-        #alpha = x_final[..., :self.ncoef]
-        beta = x_final # [..., self.ncoef:]
+        fodf = x_final[..., self.ncoef:]
+        beta = x_final[..., :self.ncoef] * 0.3
 
         out_dict['beta'] = beta
         #out_dict['alpha'] = alpha
@@ -821,6 +821,7 @@ class ENet(BaseNet):
         mean_b0_pred = x[..., :1]
 
         out_dict['sh_fake'] = sh_pred
+        out_dict['fodf_sh_fake'] = fodf
         out_dict['mean_b0_fake'] = mean_b0_pred
 
         return out_dict

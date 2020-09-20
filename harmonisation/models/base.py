@@ -13,6 +13,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+from harmonisation.utils import compute_modules
+
 
 matplotlib.use('TkAgg')
 
@@ -84,7 +86,9 @@ class BaseNet(nn.Module, object):
                 res.append(self.move_to(v, device, numpy=numpy))
             return res
         else:
-            raise TypeError("Invalid type for move_to")
+            return obj
+        # else:
+        #    raise TypeError("Invalid type for move_to")
 
     def concatenate(self, obj):
         if isinstance(obj[0], dict):
@@ -92,10 +96,22 @@ class BaseNet(nn.Module, object):
                     for k in obj[0].keys()}
         elif isinstance(obj[0], np.ndarray):
             return np.concatenate(obj)
-        else:
+        elif torch.is_tensor(obj[0]):
             return torch.cat(obj)
+        else:
+            return obj
 
-    def predict_dataset(self, dataset, batch_size=128, names=None, numpy=True):
+    def to_batch_tensor(self, obj, batch, batch_size):
+        if isinstance(obj, np.ndarray):
+            return torch.FloatTensor(
+                obj[batch * batch_size:(batch + 1) * batch_size]
+            ).to(self.device)
+        else:
+            return obj
+
+    def predict_dataset(self, dataset, inputs_needed,
+                        batch_size=128, names=None, numpy=True,
+                        modules={}, networks={}):
         """Predicts signals in dictionnary inference_dataset = {name: data}.
         """
         with torch.no_grad():
@@ -108,22 +124,28 @@ class BaseNet(nn.Module, object):
 
             for dmri_name in names:
                 data = dataset.get_data_by_name(dmri_name)
-                signals = [data[signal_name]
-                           for signal_name in self.inputs]
 
                 results[dmri_name] = []
-                nb_input = signals[0].shape[0]
-                number_of_batches = int(np.ceil(nb_input / batch_size))
+                nb_input = data[self.inputs[0]].shape[0]
+                number_of_batches = nb_input // batch_size
+                number_of_batches += int(nb_input % batch_size != 0)
 
                 for batch in tqdm.tqdm(range(number_of_batches), leave=False):
-                    signal_batch = [torch.FloatTensor(
-                        signal[batch * batch_size:(batch + 1) * batch_size])
-                        for signal in signals]
-                    signal_batch = [signal.to(self.device)
-                                    for signal in signal_batch]
-                    signal_pred = self.forward(*signal_batch)
-                    results[dmri_name].append(self.move_to(signal_pred, 'cpu',
-                                                           numpy=numpy))
+                    inputs = {
+                        signal_name: self.to_batch_tensor(data[signal_name],
+                                                          batch, batch_size)
+                        for signal_name in data.keys()}
+
+                    for input_needed in inputs_needed:
+                        inputs = compute_modules(
+                            input_needed, inputs, networks, modules)
+
+                    # signal_pred = self.forward(
+                    #     *(inputs[name]for name in self.inputs))
+                    results[dmri_name].append(
+                        self.move_to(
+                            {name: inputs[name] for name in inputs_needed},
+                            'cpu', numpy=numpy))
                 results[dmri_name] = self.concatenate(results[dmri_name])
 
         return results

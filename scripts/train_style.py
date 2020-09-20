@@ -5,11 +5,12 @@ Train an autoencoder with an adversarial loss
 from harmonisation.datasets import SHDataset, AdversarialDataset
 from harmonisation.utils import (get_paths_PPMI, get_paths_ADNI, get_paths_SIMON,
                                  train_test_val_split)
-from harmonisation.models.metric_module import FAModule, DWIModule
+from harmonisation.models.metric_module import FAModule, DWIModule, EigenModule
 from harmonisation.trainers import StyleTrainer
 from harmonisation.models import ENet, AdversarialNet
 
 from harmonisation.settings import SIGNAL_PARAMETERS
+from harmonisation.functions.shm import get_deconv_matrix
 
 import numpy as np
 
@@ -67,7 +68,7 @@ np.save(save_folder + 'mean_std.npy',
 
 
 net = ENet(sh_order=SIGNAL_PARAMETERS['sh_order'],
-           embed=[32, 32, 64, 128],
+           embed=[32, 32, 32, 32],
            encoder_relu=False,
            decoder_relu=True)
 
@@ -78,6 +79,12 @@ ncoef = int((sh_order + 2) * (sh_order + 1) / 2)
 
 gtab = validation_dataset.data[0]['gtab']
 
+fodf_sh_order = 8
+response = [15e-3, 4e-4, 4e-4, 850]
+
+R, _, B_dwi = get_deconv_matrix(gtab, response, fodf_sh_order)
+R = R.diagonal() * B_dwi
+
 dwi_module = DWIModule(gtab=gtab,
                        sh_order=sh_order,
                        mean=train_dataset.mean,
@@ -86,34 +93,33 @@ dwi_module = DWIModule(gtab=gtab,
                        b0_std=train_dataset.b0_std)
 dwi_module = dwi_module.to("cuda")
 
-fa_module = FAModule(gtab=gtab)
+eigen_module = EigenModule(gtab)
+eigen_module = eigen_module.to("cuda")
+
+fa_module = FAModule()
 fa_module = fa_module.to("cuda")
 
-modules = {'fa': fa_module, 'dwi': dwi_module}
+modules = {'fa': fa_module, 'dwi': dwi_module, 'evals': eigen_module}
 
-sites_net = AdversarialNet(in_dim=1,
+sites_net = AdversarialNet(in_dim=17,
                            out_dim=len(sites_dict),
                            num_filters=4,
                            nb_layers=4,
                            embed_size=256,
                            patch_size=SIGNAL_PARAMETERS["patch_size"],
-                           modules=modules,
                            spectral_norm=True)
 
-# sites_net, _ = AdversarialNet.load("./.saved_models/style_test_fonctionne_2/sites_55.tar.gz",
-#                                    modules=modules)
+# sites_net, _ = AdversarialNet.load("./.saved_models/style_test/sites_55.tar.gz")
 
-discriminator_net = AdversarialNet(in_dim=1,
+discriminator_net = AdversarialNet(in_dim=17,
                                    out_dim=1,
                                    num_filters=4,
                                    nb_layers=4,
                                    embed_size=256,
                                    patch_size=SIGNAL_PARAMETERS["patch_size"],
-                                   modules=modules,
                                    spectral_norm=True)
 
-# sites_net = AdversarialNet.load(save_folder + '49_sites_net.tar.gz',
-#                                modules=modules)
+# sites_net = AdversarialNet.load(save_folder + '49_sites_net.tar.gz')
 
 net = net.to("cuda")
 sites_net = sites_net.to("cuda")
@@ -187,6 +193,24 @@ TRAINER_PARAMETERS = {
                 "parameters": {},
                 "coeff": 10.,
             },
+            {
+                "type": "mse_dwi",
+                "inputs": ["fodf_sh_fake", "dwi_fake", "mask"],
+                "parameters": {"B": R, "where_b0": gtab.b0s_mask},
+                "coeff": 1e-6,
+            },
+            {
+                "type": "negative_fodf",
+                "inputs": ["fodf_sh_fake", "mask"],
+                "parameters": {"gtab": gtab,
+                               "response": response,
+                               "sh_order": fodf_sh_order,
+                               "lambda_": 1,
+                               "tau": 0.1,
+                               "size": 3,
+                               "method": "random"},
+                "coeff": 1e-6,
+            },
             # {
             #     "type": "l2_reg",
             #     "inputs": ["beta"],
@@ -211,47 +235,69 @@ TRAINER_PARAMETERS = {
             "sites": [
                 {
                     "type": "cross_entropy",
-                    "inputs": ["y_logits", "site"],
+                    "inputs": ["y_logits_sites", "site"],
                     "parameters": {},
                     "coeff": 1,
                 }],
             "discriminator": [
                 {
                     "type": "bce_logits_ones",
-                    "inputs": ["y_logits"],
+                    "inputs": ["y_logits_discriminator"],
                     "parameters": {},
                     "coeff": 1,
                 },
                 {
                     "type": "bce_logits_zeros",
-                    "inputs": ["y_logits_fake"],
+                    "inputs": ["y_logits_fake_discriminator"],
                     "parameters": {},
                     "coeff": 1,
                 }]
         }
     },
     "metrics_specs": {
-        "autoencoder": ["acc", "mse"],
+        "autoencoder": [
+            {
+                "type": "acc",
+                "inputs": ["sh", "sh_fake", "mask"],
+                "parameters": {}
+            },
+            {
+                "type": "mse",
+                "inputs": ["sh", "sh_fake", "mask"],
+                "parameters": {}
+            }],
         "adversarial": {
             "sites": [
                 {
                     "type": "accuracy",
-                    "inputs": ["site", "y_logits"],
-                    "use_fake": False,
+                    "inputs": ["y_logits_sites", "site"],
+                    "parameters": {}
                 }],
             "discriminator": [
                 {
                     "type": "accuracy",
-                    "inputs": ["labels_gan", "y_logits"],
-                    "use_fake": True,
+                    "inputs": ["y_logits_discriminator"],
+                    "parameters": {"force_label": 1}
+                },
+                {
+                    "type": "accuracy",
+                    "inputs": ["y_logits_fake_discriminator"],
+                    "parameters": {"force_label": 0}
                 },
             ]},
     },
     "metric_to_maximize": {
-        "autoencoder": "mse",
+        "autoencoder": {"agg_fun": "mean", "inputs": ["mse_sh"]},
         "adversarial": {
-            "sites": "accuracy",
-            "discriminator": "accuracy",
+            "sites": {
+                "agg_fun": "mean",
+                "inputs": ["accuracy_y_logits_sites"]
+            },
+            "discriminator": {
+                "agg_fun": "mean",
+                "inputs": ["accuracy_y_logits_discriminator",
+                           "accuracy_y_logits_fake_discriminator"]
+            },
         }
     },
     "patience": 100,
@@ -271,7 +317,7 @@ nets, adv_metrics = style_trainer.train_adversarial_net(
     train_dataset,
     validation_dataset,
     num_epochs=60,
-    batch_size=32,
+    batch_size=100,
     validation=True)
 sites_net = nets['sites']
 
@@ -379,7 +425,7 @@ style_trainer.set_adversarial_loss(
             # },
             {
                 "type": "cross_entropy",
-                "inputs": ["y_logits_fake", "site"],
+                "inputs": ["y_logits_fake_sites", "site"],
                 "parameters": {},
                 "coeff": 1,
             }]
@@ -389,8 +435,13 @@ style_trainer.set_adversarial_metric(
     {"sites": [
         {
             "type": "accuracy",
-                    "inputs": ["site", "y_logits"],
-                    "use_fake": True,
+                    "inputs": ["y_logits_sites", "site"],
+                    "parameters": {}
+        },
+        {
+            "type": "accuracy",
+                    "inputs": ["y_logits_fake_sites", "site"],
+                    "parameters": {}
         }],
      }
 )
@@ -401,7 +452,7 @@ best_nets, metrics = style_trainer.train_adversarial_net(
     validation_dataset,
     train_net_X_time=1,
     num_epochs=60,
-    batch_size=8,
+    batch_size=16,
     keep_best_net=False)
 
 
@@ -421,31 +472,31 @@ test_dataset = SHDataset(path_test,
                          n_jobs=8,
                          cache_dir="./")
 
-generated_dataset = AdversarialDataset(test_dataset,
-                                       style_trainer.net,
-                                       batch_size=16)
-generated_dataset.names = [x for x in generated_dataset.names if 'fake' in x]
-
 style_trainer.set_adversarial_metric(
     {"sites": [
         {
             "type": "accuracy",
-                    "inputs": ["site", "y_logits"],
-                    "use_fake": False,
-        }],
-     }
+                    "inputs": ["y_logits_sites", "site"],
+                    "parameters": {}
+        },
+        {
+            "type": "accuracy",
+                    "inputs": ["y_logits_fake_sites", "site"],
+                    "parameters": {}
+        }
+    ]}
 )
 
 metrics_real = style_trainer.validate_adversarial(
     'sites',
-    generated_dataset,
+    test_dataset,
     batch_size=16)
 
 print('metrics_real:', metrics_real)
 
 # Reset sites_net and train it on the fake patches
 
-sites_net_test = AdversarialNet(in_dim=1,
+sites_net_test = AdversarialNet(in_dim=17,
                                 out_dim=len(sites_dict),
                                 num_filters=4,
                                 nb_layers=4,
@@ -485,7 +536,7 @@ sites_net_test = sites_net_test['sites']
 
 metrics_fake = style_trainer_test.validate_adversarial(
     'sites',
-    generated_dataset,
+    test_dataset,
     batch_size=16)
 
 print('metrics_fake:', metrics_fake)

@@ -5,14 +5,10 @@ from torch.autograd import Variable
 
 import numpy as np
 
-from .metrics import *
-
-
-def weighted_mse(X, Z, weight):
-    """Overcomplicated to remove nans with div by 0 ... """
-    loss = ((X - Z)**2 * weight)
-    loss = loss * weight.expand_as(loss)
-    return loss.mean()
+from dipy.data import get_sphere
+from dipy.reconst.shm import (sph_harm_ind_list, cart2sphere, real_sph_harm,
+                              sh_to_rh, forward_sdeconv_mat)
+from harmonisation.functions import metrics, shm
 
 
 def weighted_mean(v, weight):
@@ -24,64 +20,129 @@ def weighted_mean(v, weight):
     return loss[torch.isnan(loss)]
 
 
-class AccLoss(nn.Module):
-    def __init__(self):
-        super(AccLoss, self).__init__()
-
-    def forward(self, X, Z, mask):
-        acc = torch_angular_corr_coeff(X + 1e-8, Z + 1e-8)
-        acc = 1 - weighted_mean(acc, mask.squeeze()).mean()
-        return acc
-
-
 class WeightedMSELoss(nn.Module):
     def __init__(self):
         super(WeightedMSELoss, self).__init__()
 
     def forward(self, X, Z, mask):
-        return weighted_mse(X, Z, mask)
+        return metrics.weighted_mse(X, Z, mask)
+
+
+class AccLoss(nn.Module):
+    def __init__(self):
+        super(AccLoss, self).__init__()
+
+        self.acc_module = metrics.AngularCorrCoeff()
+
+    def forward(self, X, Z, mask):
+        acc = self.acc_module(X + 1e-8, Z + 1e-8, mask)
+        acc = 1 - weighted_mean(acc, mask.squeeze()).mean()
+        return acc
 
 
 class DWIMSELoss(nn.Module):
-    def __init__(self, B, mean=None, std=None, voxels_to_take="center"):
-        """B is the matrix to pass from sh to dwi
-        voxels_to_take : "center", "all", or a matrix of indices
-        """
+    def __init__(self, B, where_b0, use_b0=False,
+                 mean=None, std=None, b0_mean=None, b0_std=None):
+        """B is the matrix to pass from sh to dwi"""
         super(DWIMSELoss, self).__init__()
-        self.B = torch.FloatTensor(B).to("cuda")
+        self.B = nn.Parameter(torch.FloatTensor(B), requires_grad=False)
         self.mini = .001
         self.maxi = .999
-        self.voxels_to_take = voxels_to_take
+        self.mean = nn.Parameter(torch.FloatTensor(
+            mean), requires_grad=False) if mean is not None else None
+        self.std = nn.Parameter(torch.FloatTensor(
+            std), requires_grad=False) if std is not None else None
+        self.b0_mean = nn.Parameter(torch.FloatTensor(
+            b0_mean), requires_grad=False) if b0_mean is not None else None
+        self.b0_std = nn.Parameter(torch.FloatTensor(
+            b0_std), requires_grad=False) if b0_std is not None else None
+        self.use_b0 = use_b0
+        self.where_b0 = where_b0
 
-        self.mean = torch.FloatTensor(mean) if mean is not None else None
-        self.std = torch.FloatTensor(std) if std is not None else None
+    def forward(self, X, dwi, mask):
+        if self.use_b0:
+            X_sh, X_b0 = X[..., 1:], X[..., :1]
 
-    def forward(self, X, Z, mask):
-        if torch.is_tensor(self.voxels_to_take):
-            X = X[:, self.voxels_to_take]
-            Z = Z[:, self.voxels_to_take]
-        elif self.voxels_to_take == "center":
-            c_x, c_y, cz = np.array(X.shape[1:4]) // 2
-            X = X[:, c_x, c_y, c_z]
-            Z = Z[:, c_x, c_y, c_z]
+            if self.mean is not None and self.std is not None:
+                X_sh = X_sh * self.std + self.mean
+            if self.b0_mean is not None and self.b0_std is not None:
+                X_b0 = X_b0 * self.b0_std + self.b0_mean
 
-        if self.mean is not None and self.std is not None:
-            self.mean = self.mean.to(X.device)
-            self.std = self.std.to(X.device)
-            X = X * self.std + self.mean
-            Z = Z * self.std + self.mean
+            X = X_sh * X_b0
+        else:
+            if self.mean is not None and self.std is not None:
+                X = X * self.std + self.mean
 
-        X, X_b0 = X[..., 1:], X[..., :1]
-        Z, Z_b0 = Z[..., 1:], Z[..., :1]
-
-        X = X * X_b0
-        Z = Z * Z_b0
-
-        self.B = self.B.to(X.device)
         X = torch.einsum("...i,ij", X, self.B.T).clamp(self.mini, self.maxi)
-        Z = torch.einsum("...i,ij", Z, self.B.T).clamp(self.mini, self.maxi)
-        mse = weighted_mse(X, Z, mask)
+        dwi = dwi[..., ~self.where_b0]
+        mse = metrics.weighted_mse(X, dwi, mask)
         return mse
+
+
+class NegativefODFLoss(nn.Module):
+    def __init__(self, gtab, response, sh_order, lambda_=1, tau=0.1,
+                 size=3, method='random'):
+        super(NegativefODFLoss, self).__init__()
+        m, n = sph_harm_ind_list(sh_order)
+
+        # x, y, z = gtab.gradients[self._where_dwi].T
+        # r, theta, phi = cart2sphere(x, y, z)
+        # # for the gradient sphere
+        # B_dwi = real_sph_harm(m, n, theta[:, None], phi[:, None])
+        B_dwi, _ = shm.get_B_matrix(gtab, sh_order)
+
+        self.sphere = get_sphere('symmetric362')
+        r, theta, phi = cart2sphere(
+            self.sphere.x,
+            self.sphere.y,
+            self.sphere.z
+        )
+        # B_reg = real_sph_harm(m, n, theta[:, None], phi[:, None])
+        B_reg = shm.get_B_matrix(theta=theta, phi=phi, sh_order=sh_order)
+
+        S_r = shm.estimate_response(gtab, response[0:3], response[3])
+        r_sh = np.linalg.lstsq(B_dwi, S_r[~gtab.b0s_mask], rcond=-1)[0]
+        n_response = n
+        m_response = m
+        r_rh = sh_to_rh(r_sh, m_response, n_response)
+        R = forward_sdeconv_mat(r_rh, n)
+
+        # scale lambda_ to account for differences in the number of
+        # SH coefficients and number of mapped directions
+        # This is exactly what is done in [4]_
+        lambda_ = (lambda_ * R.shape[0] * r_rh[0] /
+                   (np.sqrt(B_reg.shape[0]) * np.sqrt(362.)))
+        B_reg = torch.FloatTensor(B_reg * lambda_)
+        self.B_reg = nn.Parameter(B_reg, requires_grad=False)
+        self.tau = tau
+
+        self.size = size
+        self.method = method
+
+    def forward(self, fodf_sh, mask):
+        px, py, pz = fodf_sh.shape[1:4]
+        if self.method == 'center':
+            s = self.size
+            fodf_sh = fodf_sh[:,
+                              px - s:px + s,
+                              py - s:py + s,
+                              pz - s:pz + s, :]
+        else:
+            number = self.size**3
+            idx = np.array([(i, j, k) for i in range(px)
+                            for j in range(py) for k in range(pz)])
+            idx = tuple(zip(*idx[
+                np.random.choice(range(px * py * pz), number, replace=False)]
+            ))
+            fodf_sh = fodf_sh[(slice(None),) + idx]
+        fodf = torch.einsum("...i,ij", fodf_sh, self.B_reg.T)
+        threshold = self.B_reg[0, 0] * fodf_sh[..., 0:1] * self.tau
+        where_fodf_small = torch.nonzero(fodf < threshold, as_tuple=True)
+        fodf = fodf[where_fodf_small]
+
+        loss = torch.mean((fodf**2).sum(-1))
+
+        return loss
 
 
 class GFAMSELoss(nn.Module):
@@ -89,7 +150,7 @@ class GFAMSELoss(nn.Module):
         super(GFAMSELoss, self).__init__()
 
     def forward(self, X, Z, mask):
-        return torch_mse_gfa(X, Z, mask).mean()
+        return metrics.torch_mse_gfa(X, Z, mask).mean()
 
 
 class APMSELoss(nn.Module):
@@ -97,7 +158,7 @@ class APMSELoss(nn.Module):
         super(APMSELoss, self).__init__()
 
     def forward(self, X, Z, mask):
-        return torch_mse_anisotropic_power(X, Z, mask).mean()
+        return metrics.torch_mse_anisotropic_power(X, Z, mask).mean()
 
 
 class RISMSELoss(nn.Module):
@@ -105,7 +166,7 @@ class RISMSELoss(nn.Module):
         super(RISMSELoss, self).__init__()
 
     def forward(self, X, Z, mask):
-        return torch_mse_RIS(X, Z, mask).mean()
+        return metrics.torch_mse_RIS(X, Z, mask).mean()
 
 
 class onlyones_BCEWithLogitsLoss(nn.Module):
@@ -142,6 +203,7 @@ class onlyzeros_BCEWithLogitsLoss(nn.Module):
 
 class SmoothCrossEntropyLoss(nn.modules.loss._WeightedLoss):
     """Cross-entropy with label smoothing"""
+
     def __init__(self, weight=None, reduction='mean', smoothing=0.0):
         super().__init__(weight=weight, reduction=reduction)
         self.smoothing = smoothing
@@ -357,7 +419,8 @@ def get_loss_dict():
     return {
         'acc': AccLoss,
         'mse': WeightedMSELoss,
-        'dwi_mse': DWIMSELoss,
+        'mse_dwi': DWIMSELoss,
+        'negative_fodf': NegativefODFLoss,
         'mse_RIS': RISMSELoss,
         'mse_ap': APMSELoss,
         'mse_gfa': GFAMSELoss,

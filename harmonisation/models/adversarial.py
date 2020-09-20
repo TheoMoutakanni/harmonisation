@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import numpy as np
 from collections import OrderedDict
@@ -32,7 +33,7 @@ def conv_block_2_3d(in_dim, out_dim, activation, normalization,
 
 class AdversarialNet(BaseNet):
     def __init__(self, in_dim, out_dim, num_filters,
-                 nb_layers, embed_size, patch_size, modules,
+                 nb_layers, embed_size, patch_size,
                  spectral_norm=False):
         super(AdversarialNet, self).__init__(
             in_dim=in_dim,
@@ -41,7 +42,6 @@ class AdversarialNet(BaseNet):
             nb_layers=nb_layers,
             embed_size=embed_size,
             patch_size=patch_size,
-            # modules=modules),
             spectral_norm=spectral_norm,
         )
 
@@ -53,9 +53,7 @@ class AdversarialNet(BaseNet):
         self.patch_size = np.array(patch_size)
         self.spectral_norm = spectral_norm
 
-        self.inputs = ['sh', 'mean_b0', 'mask']
-
-        self.modules = modules
+        self.inputs = ['sh', 'mean_b0', 'fa', 'mask']
 
         activation = nn.LeakyReLU(0.2, inplace=True)
         normalization = nn.BatchNorm3d
@@ -90,16 +88,11 @@ class AdversarialNet(BaseNet):
 
         self.classifier_out = fun(nn.Linear(self.embed_size, self.out_dim))
 
-    def forward(self, x, mean_b0, mask):
+    def forward(self, sh, mean_b0, fa, mask):
         out_dict = {}
 
-        dwi = self.modules['dwi'](x, mean_b0)
-        fa = self.modules['fa'](dwi, mask)
-
-        # out_feat['dwi'] = dwi
-        # out_feat['fa'] = fa
-
-        x = fa.permute((0, 4, 1, 2, 3))
+        x = torch.cat([sh, mean_b0, fa], dim=-1
+                      ).permute((0, 4, 1, 2, 3))
 
         for name, layer in self.classifier_feat.items():
             x = layer(x)
