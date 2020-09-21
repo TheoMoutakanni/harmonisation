@@ -224,7 +224,7 @@ class NumberSmallfODF(nn.Module):
 
 
 def get_metric_dict():
-    """Return a dict with all the metrics to be computed during an epoch
+    """Return a dict with all the metric functions
     Metrics must be greater when better, so -mse instead of mse for example"""
     return {
         'acc': AngularCorrCoeff,
@@ -239,6 +239,24 @@ def get_metric_dict():
 
 
 def get_metric_fun(metric_specs, device):
+    """Take a dictionnary of metrics specs and a device et return a dict
+    with a metric module and its paramters.
+
+    Attributes:
+        metric_specs (list[dict]): a list of all metrics specifications:
+        {"type" (float): the metric function name found in "get_metric_dict",
+         "parameters" (dict): dict of parameters to initialize the module,
+         "inputs" (list[str]): the list of inputs name IN ORDER for the forward
+                               method of the module,}
+        device (str or torch.device): the device of the module
+
+    Returns:
+        A dict of dict where each key is the concatenation of the metric name
+        and the first input:
+        {"fun" (nn.Module): the metric module,
+         "inputs" (list[str]): the list of inputs IN ORDER,
+         "type" (float): the metric name}
+    """
     metric_dict = get_metric_dict()
     metrics = {}
     for specs in metric_specs:

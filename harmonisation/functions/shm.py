@@ -27,7 +27,18 @@ def normalize_data(data, where_b0, min_signal=1e-5, out=None):
 
 
 def get_B_matrix(gtab=None, sh_order=8, theta=None, phi=None, smooth=0.006):
-    # m, n = sph_harm_ind_list(sh_order)
+    """Function that return matrices for Spherical Harmonics fitting
+    Attributes:
+        gtab (dipy GradientTable): the gradient of the dwi to be fitted
+        sh_order (int): Order of the Spherical Harmonics
+        theta: custom gradient angle used instead of gtab in combinaison w/ phi
+        phi: same as theta
+        smooth (float): the smoothing parameter for the laplacian
+
+    Returns:
+        B (np.array(nb_dwi_directions, nb_sh_coeff)): matrix to fit SH->DWI
+        invB (np.array(nb_sh_coeff, nb_dwi_directions)): matrix to fit DWI->SH
+    """
     if theta is None or phi is None:
         x, y, z = gtab.gradients[~gtab.b0s_mask].T
         r, theta, phi = cart2sphere(x, y, z)
@@ -93,6 +104,16 @@ def sh_to_dwi(data_sh, gtab, mask=None, add_b0=True, smooth=0.006):
 
 
 def estimate_response(gtab, evals, S0):
+    """ Compute the response of a single fiber
+    Attributes:
+        gtab (dipy GradientTable): the gradient of the dwi in wich the response
+                                   is represented.
+        evals (float[3]): list of the 3 eigenvalues
+        S0 (float): mean b0 in the single fiber voxels
+
+    Returns:
+        S: the single fiber response in the gtab directions
+    """
     evecs = np.array([[0, 0, 1],
                       [0, 1, 0],
                       [1, 0, 0]])
@@ -109,6 +130,18 @@ def estimate_response(gtab, evals, S0):
 
 
 def get_deconv_matrix(gtab, response, sh_order):
+    """ Compute the deconvolution of the response of a single fiber
+    Attributes:
+        gtab (dipy GradientTable): the gradient of the dwi in wich the response
+                                   is represented.
+        response (float[4]): first 3 elements: eigenvalues, 4th: mean b0 value
+        sh_order (int): the sh_order of the DWI used for the deconvolution
+
+    Returns:
+        R:
+        r_rh:
+        B_dwi (np.array(nb_sh_coeff, nb_dwi_directions)): matrix to fit DWi->SH
+    """
     m, n = sph_harm_ind_list(sh_order)
 
     # x, y, z = gtab.gradients[~gtab.b0s_mask].T
@@ -124,6 +157,6 @@ def get_deconv_matrix(gtab, response, sh_order):
     r_rh = sh_to_rh(r_sh, m_response, n_response)
     R = forward_sdeconv_mat(r_rh, n)
 
-    X = R.diagonal() * B_dwi
+    # X = R.diagonal() * B_dwi
 
     return R, r_rh, B_dwi

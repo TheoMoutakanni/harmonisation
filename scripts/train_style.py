@@ -101,7 +101,7 @@ fa_module = fa_module.to("cuda")
 
 modules = {'fa': fa_module, 'dwi': dwi_module, 'evals': eigen_module}
 
-sites_net = AdversarialNet(in_dim=17,
+sites_net = AdversarialNet(in_dim=20,
                            out_dim=len(sites_dict),
                            num_filters=4,
                            nb_layers=4,
@@ -111,7 +111,7 @@ sites_net = AdversarialNet(in_dim=17,
 
 # sites_net, _ = AdversarialNet.load("./.saved_models/style_test/sites_55.tar.gz")
 
-discriminator_net = AdversarialNet(in_dim=17,
+discriminator_net = AdversarialNet(in_dim=20,
                                    out_dim=1,
                                    num_filters=4,
                                    nb_layers=4,
@@ -193,24 +193,24 @@ TRAINER_PARAMETERS = {
                 "parameters": {},
                 "coeff": 10.,
             },
-            {
-                "type": "mse_dwi",
-                "inputs": ["fodf_sh_fake", "dwi_fake", "mask"],
-                "parameters": {"B": R, "where_b0": gtab.b0s_mask},
-                "coeff": 1e-6,
-            },
-            {
-                "type": "negative_fodf",
-                "inputs": ["fodf_sh_fake", "mask"],
-                "parameters": {"gtab": gtab,
-                               "response": response,
-                               "sh_order": fodf_sh_order,
-                               "lambda_": 1,
-                               "tau": 0.1,
-                               "size": 3,
-                               "method": "random"},
-                "coeff": 1e-6,
-            },
+            # {
+            #     "type": "mse_dwi",
+            #     "inputs": ["fodf_sh_fake", "dwi_fake", "mask"],
+            #     "parameters": {"B": R, "where_b0": gtab.b0s_mask},
+            #     "coeff": 1e-6,
+            # },
+            # {
+            #     "type": "negative_fodf",
+            #     "inputs": ["fodf_sh_fake", "mask"],
+            #     "parameters": {"gtab": gtab,
+            #                    "response": response,
+            #                    "sh_order": fodf_sh_order,
+            #                    "lambda_": 1,
+            #                    "tau": 0.1,
+            #                    "size": 3,
+            #                    "method": "center"},
+            #     "coeff": 1e-6,
+            # },
             # {
             #     "type": "l2_reg",
             #     "inputs": ["beta"],

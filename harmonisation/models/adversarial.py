@@ -53,7 +53,7 @@ class AdversarialNet(BaseNet):
         self.patch_size = np.array(patch_size)
         self.spectral_norm = spectral_norm
 
-        self.inputs = ['sh', 'mean_b0', 'fa', 'mask']
+        self.inputs = ['sh', 'mean_b0', 'fa', 'evals', 'mask']
 
         activation = nn.LeakyReLU(0.2, inplace=True)
         normalization = nn.BatchNorm3d
@@ -88,10 +88,10 @@ class AdversarialNet(BaseNet):
 
         self.classifier_out = fun(nn.Linear(self.embed_size, self.out_dim))
 
-    def forward(self, sh, mean_b0, fa, mask):
+    def forward(self, sh, mean_b0, fa, evals, mask):
         out_dict = {}
 
-        x = torch.cat([sh, mean_b0, fa], dim=-1
+        x = torch.cat([sh, mean_b0, fa, evals], dim=-1
                       ).permute((0, 4, 1, 2, 3))
 
         for name, layer in self.classifier_feat.items():

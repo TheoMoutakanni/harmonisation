@@ -29,6 +29,8 @@ class WeightedMSELoss(nn.Module):
 
 
 class AccLoss(nn.Module):
+    """Angular Correlation Coefficient Loss"""
+
     def __init__(self):
         super(AccLoss, self).__init__()
 
@@ -41,9 +43,21 @@ class AccLoss(nn.Module):
 
 
 class DWIMSELoss(nn.Module):
+    """MSE Loss between a true DWI signal and a predicted SH signal remapped
+    on the DWI directions"""
+
     def __init__(self, B, where_b0, use_b0=False,
                  mean=None, std=None, b0_mean=None, b0_std=None):
-        """B is the matrix to pass from sh to dwi"""
+        """
+        Attributes:
+            B (np.array(nb_dwi_directions, nb_sh_coeff)): matrix to fit SH->DWI
+            where_b0 (array[bool]): where are the b0 values in the DWI
+            use_b0 (bool): do the SH inputs have b0 values as 1st channel?
+            mean (array[float]): the mean to unnormalize the SH coeffs
+            std (array[float]): the std to unnormalize the SH coeffs
+            mean_b0 (array[float]): the mean to unnormalize the b0 values
+            std_b0 (array[float]): the std to unnormalize the b0 values
+        """
         super(DWIMSELoss, self).__init__()
         self.B = nn.Parameter(torch.FloatTensor(B), requires_grad=False)
         self.mini = .001
@@ -60,6 +74,17 @@ class DWIMSELoss(nn.Module):
         self.where_b0 = where_b0
 
     def forward(self, X, dwi, mask):
+        """Return the MSE between the fitted DWI signal on the predicted
+        SH coeffs of X and the true DWI signal
+
+        Attributes:
+            X (torch.tensor(batch, X, Y, Z, C)): Tensor of SH coeffs, if use_b0
+                                                 is True, the first channel is
+                                                 the b0 value.
+            dwi (torch.tensor(batch, X, Y, Z, C)): Tensor of DWI coeffs
+        Returns:
+            mse (torch.tensor): the computed MSE
+        """
         if self.use_b0:
             X_sh, X_b0 = X[..., 1:], X[..., :1]
 
@@ -80,16 +105,29 @@ class DWIMSELoss(nn.Module):
 
 
 class NegativefODFLoss(nn.Module):
+    """Compute the norm of the negative fODF values on the sphere
+    Only a subsample of the original 3D matrices is taken to fasten the
+    computation and reduce memory consumption (the sphere has 362 directions)
+    """
     def __init__(self, gtab, response, sh_order, lambda_=1, tau=0.1,
-                 size=3, method='random'):
+                 size=3, method='center'):
+        """
+        Attributes:
+            gtab (dipy GradientTable): the gradient of the dwi in wich the
+                                       response is represented.
+            response (float[4]): first 3 elements: eigenvalues
+                                 4th one: mean b0 value
+            sh_order (int): the sh_order of the DWI used for the deconvolution
+            lambda_ (float): the coefficient to rescale the loss
+                             better to keep to 1. and change the 'coeff' param
+                             when defining the loss
+            tau (float): the coefficient to rescale the threshold used
+            size (int): the size of the subsample taken to compute the loss
+                        take size**3 voxels
+            method (str): the method to take the subsample (random or center)
+        """
         super(NegativefODFLoss, self).__init__()
         m, n = sph_harm_ind_list(sh_order)
-
-        # x, y, z = gtab.gradients[self._where_dwi].T
-        # r, theta, phi = cart2sphere(x, y, z)
-        # # for the gradient sphere
-        # B_dwi = real_sph_harm(m, n, theta[:, None], phi[:, None])
-        B_dwi, _ = shm.get_B_matrix(gtab, sh_order)
 
         self.sphere = get_sphere('symmetric362')
         r, theta, phi = cart2sphere(
@@ -100,12 +138,7 @@ class NegativefODFLoss(nn.Module):
         # B_reg = real_sph_harm(m, n, theta[:, None], phi[:, None])
         B_reg = shm.get_B_matrix(theta=theta, phi=phi, sh_order=sh_order)
 
-        S_r = shm.estimate_response(gtab, response[0:3], response[3])
-        r_sh = np.linalg.lstsq(B_dwi, S_r[~gtab.b0s_mask], rcond=-1)[0]
-        n_response = n
-        m_response = m
-        r_rh = sh_to_rh(r_sh, m_response, n_response)
-        R = forward_sdeconv_mat(r_rh, n)
+        R, r_rh, B_dwi = shm.get_deconv_matrix(gtab, response, sh_order)
 
         # scale lambda_ to account for differences in the number of
         # SH coefficients and number of mapped directions
@@ -146,6 +179,7 @@ class NegativefODFLoss(nn.Module):
 
 
 class GFAMSELoss(nn.Module):
+    """MSE of the gfa values computed on X and Z"""
     def __init__(self):
         super(GFAMSELoss, self).__init__()
 
@@ -154,6 +188,7 @@ class GFAMSELoss(nn.Module):
 
 
 class APMSELoss(nn.Module):
+    """MSE of the anisotropic power values computed on X and Z"""
     def __init__(self):
         super(APMSELoss, self).__init__()
 
@@ -162,6 +197,8 @@ class APMSELoss(nn.Module):
 
 
 class RISMSELoss(nn.Module):
+    """MSE of the Rotational Invariant Spherical features values
+    computed on X and Z"""
     def __init__(self):
         super(RISMSELoss, self).__init__()
 
@@ -170,6 +207,8 @@ class RISMSELoss(nn.Module):
 
 
 class onlyones_BCEWithLogitsLoss(nn.Module):
+    """BCE with logits but only for values with label=1
+    Used to ease the construction of the training scheme in settings.py"""
     def __init__(self, weight=None, pos_weight=None, reduction='mean'):
         super(onlyones_BCEWithLogitsLoss, self).__init__()
         self.weight = weight
@@ -186,6 +225,8 @@ class onlyones_BCEWithLogitsLoss(nn.Module):
 
 
 class onlyzeros_BCEWithLogitsLoss(nn.Module):
+    """BCE with logits but only for values with label=0
+    Used to ease the construction of the training scheme in settings.py"""
     def __init__(self, weight=None, pos_weight=None, reduction='mean'):
         super(onlyzeros_BCEWithLogitsLoss, self).__init__()
         self.weight = weight
@@ -326,39 +367,40 @@ def gram_matrix(input):
 
 
 class GramLoss(nn.Module):
-    """MSE of Gramm Matrices"""
+    """MSE of Gramm Matrices of features vector"""
 
-    def __init__(self, target_features, layers_coeff=None):
-        """target_features: dict {layer_name: layer_features}
+    def __init__(self, target_features):
+        """
+        Attributes:
+            target_features (torch.tensor): A tensor of features to converge to
         """
         super(GramLoss, self).__init__()
         self.target_G = nn.Parameter(
             gram_matrix(torch.FloatTensor(target_features)),
             requires_grad=False)
-        self.layers_coeff = layers_coeff if layers_coeff is not None else 1.
+        self.layer_coeff = layer_coeff if layer_coeff is not None else 1.
 
     def forward(self, inputs):
         G = gram_matrix(inputs)
-        loss = self.layers_coeff * F.mse_loss(G, self.target_G.expand_as(G))
+        loss = F.mse_loss(G, self.target_G.expand_as(G))
         return loss.mean()
 
 
 class FeatureLoss(nn.Module):
     """MSE of each feature vector"""
 
-    def __init__(self, target_features, layers_coeff=None):
-        """target_features: dict {layer_name: layer_features}
+    def __init__(self, target_features):
+        """
+        Attributes:
+            target_features (torch.tensor): A tensor of features to converge to
         """
         super(FeatureLoss, self).__init__()
         self.target_features = nn.Parameter(
             torch.FloatTensor(target_features).mean(0),
             requires_grad=False)
 
-        self.layers_coeff = layers_coeff if layers_coeff is not None else 1.
-
     def forward(self, inputs):
-        loss = self.layers_coeff * \
-            F.mse_loss(inputs, self.target_features.expand_as(inputs))
+        loss = F.mse_loss(inputs, self.target_features.expand_as(inputs))
         return loss.mean()
 
 
@@ -416,6 +458,7 @@ class HistLoss(nn.Module):
 
 
 def get_loss_dict():
+    """Return a dict with all the loss functions"""
     return {
         'acc': AccLoss,
         'mse': WeightedMSELoss,
@@ -445,6 +488,24 @@ def get_loss_dict():
 
 
 def get_loss_fun(loss_specs, device):
+    """Take a dictionnary of loss specs and a device et return a dict
+    with a loss module and its paramters.
+
+    Attributes:
+        loss_specs (list[dict]): a list of all loss specifications:
+        {"type" (float): the loss function name found in "get_metric_dict",
+         "parameters" (dict): dict of parameters to initialize the module,
+         "inputs" (list[str]): the list of inputs name IN ORDER for the forward
+                               method of the module,}
+        device (str or torch.device): the device of the module
+
+    Returns:
+        A list of dict:
+        {"fun" (nn.Module): the loss module,
+         "inputs" (list[str]): the list of inputs IN ORDER,
+         "coeff" (float): the coefficient to multiply the loss with,
+         "type" (float): the loss name}
+    """
     loss_dict = get_loss_dict()
     losses = []
     for specs in loss_specs:

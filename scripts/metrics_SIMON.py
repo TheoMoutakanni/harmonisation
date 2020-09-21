@@ -15,7 +15,7 @@ save_folder = "./.saved_models/style_feat/"
 
 paths, sites = get_paths_SIMON()
 paths_fake, _ = get_paths_SIMON(
-    simon_path='/home/theo/Documents/Harmonisation/data/CCNA')
+    simon_path='/home/theo/Documents/Harmonisation/data/CCNA_meilleur')
 
 folds = {}
 with open(save_folder + "train_val_test.txt", "r") as file:

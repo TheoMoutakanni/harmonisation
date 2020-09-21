@@ -51,6 +51,7 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
     mask = None
     net_pred = None
     mean_b0_pred = None
+    fodf_sh_fake = None
     alpha = None
     beta = None
     dwi_true = None
@@ -79,9 +80,13 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
     #     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'])
     # sh_true = sh_true * dataset.std + dataset.mean
 
+    inputs_needed = ['sh_fake', 'mean_b0_fake', 'beta']
+
     net_pred = net.predict_dataset(dataset,
+                                   inputs_needed,
                                    batch_size=1,
-                                   numpy=False)[dwi_name]
+                                   numpy=False,
+                                   networks={'autoencoder': net})[dwi_name]
     sh_pred = net_pred['sh_fake']
     mean_b0_pred = net_pred['mean_b0_fake']
     # alpha = net_pred['alpha']
@@ -103,9 +108,9 @@ for dwi_name in tqdm.tqdm([path['name'] for path in paths]):
         remove_border=remove_border).numpy()
     mean_b0_pred = mean_b0_pred * dataset.b0_std + dataset.b0_mean
 
-    # alpha = batch_to_xyz(
+    # fodf_sh_fake = batch_to_xyz(
     #     alpha,
-    #     data['real_size'],
+    #     data['fodf_sh_fake'],
     #     empty=data['empty'],
     #     overlap_coeff=SIGNAL_PARAMETERS['overlap_coeff'],
     #     remove_border=remove_border).numpy()
