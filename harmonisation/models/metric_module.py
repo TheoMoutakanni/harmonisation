@@ -18,6 +18,7 @@ class APModule(nn.Module):
         self.non_negative = non_negative
 
         self.inputs = ['sh']
+        self.outputs = ['ap']
 
     def forward(sh_coeffs):
         dim = sh_coeffs.shape[:-1]
@@ -44,7 +45,7 @@ class APModule(nn.Module):
         # Deal with residual negative values:
         if self.non_negative:
             log_ap[log_ap < 0] = 0
-        return log_ap
+        return {'ap': log_ap}
 
 
 class DWIModule(nn.Module):
@@ -80,6 +81,7 @@ class DWIModule(nn.Module):
             self.b0_std = None
 
         self.inputs = ['sh', 'mean_b0']
+        self.outputs = ['dwi']
 
     def add_b0(self, dwi, mean_b0):
         dwi = dwi * mean_b0
@@ -108,7 +110,7 @@ class DWIModule(nn.Module):
         self.B = self.B.to(sh.device)
         dwi = torch.einsum("...i,ij", sh, self.B.T).clamp(self.mini, self.maxi)
         dwi = self.add_b0(dwi, mean_b0)
-        return dwi
+        return {'dwi': dwi}
 
 
 class SymEig(nn.Module):
@@ -166,6 +168,7 @@ class EigenModule(nn.Module):
         self.symeig_module = SymEig()
 
         self.inputs = ['dwi']
+        self.outputs = ['evals', 'evecs']
 
     def forward(self, dwi):
         # self.design_matrix_inv = self.design_matrix_inv.to(dwi.device)
@@ -183,7 +186,7 @@ class EigenModule(nn.Module):
         eigenvals = eigenvals.clamp(min=self.min_diffusivity)
         eigenvals[torch.isnan(eigenvals)] = 0
 
-        return eigenvals  # , eigenvectors
+        return {'evals': eigenvals, 'evecs': eigenvectors}
 
 
 class FAModule(nn.Module):
@@ -191,6 +194,7 @@ class FAModule(nn.Module):
         super(FAModule, self).__init__()
 
         self.inputs = ['evals', 'mask']
+        self.outputs = ['fa']
 
     def forward(self, eigenvals, mask):
         all_zero = (eigenvals == 0).all(axis=-1)
@@ -201,36 +205,39 @@ class FAModule(nn.Module):
 
         fa = fa.unsqueeze(-1)
 
-        return fa * mask
+        return {'fa': fa * mask}
 
 
 class MDModule(nn.Module):
     def __init__(self):
         super(MDModule, self).__init__()
         self.inputs = ['evals', 'mask']
+        self.outputs = ['md']
 
     def forward(self, eigenvals, mask):
         md = eigenvals.mean(-1, keepdim=True)
-        return md * mask
+        return {'md': md * mask}
 
 
 class ADModule(nn.Module):
     def __init__(self):
         super(ADModule, self).__init__()
         self.inputs = ['evals', 'mask']
+        self.outputs = ['ad']
 
     def forward(self, eigenvals, mask):
-        return eigenvals[..., 0] * mask
+        return {'ad': eigenvals[..., 0] * mask}
 
 
 class RDModule(nn.Module):
     def __init__(self):
         super(RDModule, self).__init__()
         self.inputs = ['evals', 'mask']
+        self.outputs = ['rd']
 
     def forward(self, eigenvals, mask):
         rd = eigenvals[..., 1:].mean(-1, keepdim=True)
-        return rd * mask
+        return {'rd': rd * mask}
 
 
 class fODFModule(nn.Module):
@@ -286,6 +293,7 @@ class fODFModule(nn.Module):
         self.P = self.P + mu * torch.eye(self.P.shape[0])
 
         self.inputs = ['dwi', 'mask']
+        self.outputs = ['fodf']
 
     def _solve_cholesky(self, A, b):
         u = torch.cholesky(A)
@@ -351,4 +359,4 @@ class fODFModule(nn.Module):
         dwi = dwi[self._where_dwi]
         fodf, _ = csdeconv(dwi)
 
-        return fodf
+        return {'fodf': fodf}

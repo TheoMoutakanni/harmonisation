@@ -7,14 +7,13 @@ import numpy as np
 import copy
 from tqdm import tqdm
 
-from harmonisation.functions import metrics, shm
+from harmonisation.functions.metrics import get_metric_fun
 from harmonisation.functions.losses import get_loss_fun
-from harmonisation.viz import print_peaks, print_diff, print_RIS, print_data
-from harmonisation.datasets.utils import batch_to_xyz
-
-import matplotlib.pyplot as plt
+from harmonisation.datasets import AdversarialDataset
 
 from harmonisation.utils import compute_modules
+
+import torch.autograd.profiler as profiler
 
 
 class Iterator():
@@ -30,180 +29,189 @@ class Iterator():
 
 class BaseTrainer():
     def __init__(self,
-                 net,
+                 dict_net,
+                 modules={},
                  optimizer_parameters={
-                     "lr": 0.001,
-                     "weight_decay": 1e-8,
+                     "autoencoder": {
+                         "lr": 0.01,
+                         "weight_decay": 1e-8,
+                     },
+                     "aversarial": {
+                         "lr": 0.01,
+                         "weight_decay": 1e-8,
+                     }
                  },
-                 loss_specs=[{
-                     "type": "acc",
-                     "parameters": {},
-                     "coeff": 1,
-                 }],
-                 metrics=["acc", "mse"],
-                 metric_to_maximize="acc",
+                 scheduler_parameters={
+                     "autoencoder": {
+                         "base_lr": 1e-3,
+                         "max_lr": 1e-2,
+                         "step_size_up": 2000,
+                     },
+                     "aversarial": {
+                         "base_lr": 1e-3,
+                         "max_lr": 1e-2,
+                         "step_size_up": 2000,
+                     }
+                 },
+                 loss_specs={
+                     "autoencoder": [
+                         {
+                             "coeff": 1.,
+                             "type": "mse",
+                             "parameters": {}
+                         },
+                     ],
+                     "adversarial": [
+                         {
+                             "coeff": 1.,
+                             "type": "bce",
+                             "parameters": {}
+                         }
+                     ]
+                 },
+                 metrics_specs={
+                     "autoencoder": ["acc", "mse"],
+                     "adversarial": ["accuracy"]
+                 },
+                 metric_to_maximize={
+                     "autoencoder": "acc",
+                     "adversarial": "accuracy"
+                 },
                  patience=10,
                  save_folder=None,
+                 device="cuda",
                  ):
-        self.net = net
+        self.device = device
+        self.dict_net = dict_net
         self.metric_to_maximize = metric_to_maximize
-        self.metrics = metrics
-        self.losses = get_loss_fun(loss_specs)
-        self.optimizer = optim.Adam(
-            self.net.parameters(), **optimizer_parameters)
+        self.metrics = {
+            name: get_metric_fun(metric_d, "cpu")
+            for name, metric_d in metrics_specs.items()}
+        self.losses = {
+            name: get_loss_fun(loss_d, self.device)
+            for name, loss_d in loss_specs.items()}
+        self.optimizer = {
+            name: optim.SGD(self.dict_net[name].parameters(), **params)
+            for name, params in optimizer_parameters.items()}
+        self.scheduler = {
+            name: optim.lr_scheduler.CyclicLR(
+                self.optimizer[name], **params)
+            for name, params in scheduler_parameters.items()
+        }
+
+        self.nb_step = {name: 0 for name in self.dict_net}
+
+        self.modules = modules
 
         self.patience = patience
         self.save_folder = save_folder
         self.writer_path = self.save_folder + '/data/'
         self.writer = SummaryWriter(logdir=self.writer_path)
 
-    def validate(self, validation_dataset, batch_size=128):
-        """
-        Compute metrics on validation_dataset
-        """
-        data_true = {name: validation_dataset.get_data_by_name(name)
-                     for name in validation_dataset.names}
+    def set_loss(self, loss_specs_by_net, add=False):
+        """If add=True, does not replace the old ones"""
+        for net_name, loss_specs in loss_specs_by_net.items():
+            new_losses = get_loss_fun(loss_specs, self.device)
+            if add:
+                self.losses[net_name].extend(new_losses)
+            else:
+                self.losses[net_name] = new_losses
 
-        inputs_needed = [
-            x for metric_d in self.metrics.values()
-            for x in metric_d['inputs']]
+    def set_metric(self, metric_specs_by_net, add=False):
+        """If add=True, does not replace the old ones"""
+        for net_name, metric_specs in metric_specs_by_net.items():
+            new_metrics = get_metric_fun(metric_specs, "cpu")
+            if add:
+                self.metrics[net_name].update(new_metrics)
+            else:
+                self.metrics[net_name] = new_metrics
 
-        data_fake = self.net.predict_dataset(validation_dataset,
-                                             inputs_needed,
-                                             batch_size=batch_size,
-                                             modules=self.modules)
-        metrics_fun = metrics.get_metric_dict()
+    def validate(self, net, metrics, dataset, batch_size=128):
+        """
+        Compute metrics on validation_dataset and print some metrics
+        """
+
+        inputs_needed = [x for metric_d in metrics.values()
+                         for x in metric_d['inputs']]
+
+        net_pred = net.predict_dataset(
+            dataset,
+            inputs_needed,
+            batch_size=batch_size,
+            modules=self.modules,
+            networks=self.dict_net)
 
         metrics_batches = []
-        for name in list(set(data_fake.keys()) & set(data_true.keys())):
+        for name in net_pred.keys():
             dic = dict()
-            for metric in self.metrics:
-                metric_calc = []
-                nb_batches = int(
-                    np.ceil(len(data_fake[name]['sh_fake']) / batch_size))
-                for batch in range(nb_batches):
-                    idx = range(batch * batch_size,
-                                min((batch + 1) * batch_size,
-                                    len(data_fake[name]['sh_fake'])))
-                    metric_calc.append(metrics_fun[metric](
-                        torch.FloatTensor(data_true[name]['sh'][idx]),
-                        torch.FloatTensor(data_fake[name]['sh_fake'][idx]),
-                        torch.LongTensor(data_true[name]['mask'][idx])
-                    ))
-                dic[metric] = metrics.nanmean(torch.cat(metric_calc)).numpy()
+            inputs = net_pred[name]
+            for metric, metric_d in metrics.items():
+                dic[metric] = np.nanmean(
+                    metric_d["fun"](
+                        *[torch.FloatTensor(
+                            inputs[input_params["net"]][input_params["name"]])
+                          for input_params in metric_d['inputs']]
+                    )
+                )
+
             metrics_batches.append(dic)
 
         metrics_epoch = {
             metric: np.nanmean(
                 [m[metric] for m in metrics_batches])
-            for metric in self.metrics
+            for metric in metrics
         }
 
         return metrics_epoch
 
-    def compute_modules(self, input_needed, inputs, nets_dict, modules):
-        # if 'dwi' in inputs_needed and 'dwi' not in inputs.keys():
-        #     inputs['dwi'] = self.modules['dwi'](inputs['sh'],
-        #                                         inputs['mean_b0'])
-        # if 'dwi_fake' in inputs_needed and 'dwi_fake' not in inputs.keys():
-        #     inputs['dwi_fake'] = self.modules['dwi'](inputs['sh_fake'],
-        #                                              inputs['mean_b0_fake'])
-        # if 'fa' in inputs_needed and 'fa' not in inputs.keys():
-        #     inputs['fa'] = self.modules['fa'](inputs['dwi'], inputs['mask'])
-        # if 'fa_fake' in inputs_needed and 'fa_fake' not in inputs.keys():
-        #     inputs['fa_fake'] = self.modules['fa'](inputs['dwi_fake'],
-        #                                            inputs['mask'])
+    def get_batch_loss(self, net, inputs, losses):
+        """ Get the loss for the adversarial network
+        Single forward and backward pass """
 
-        # return inputs
+        if 'site' in inputs["dataset"].keys():
+            inputs["dataset"]['site'] = inputs["dataset"]['site'].squeeze(-1)
 
-        if input_needed not in inputs.keys():
-            if any([input_needed in x for x in modules.keys()]):
-                module_name = input_needed.split('_')[0]
-                net_inputs = modules[module_name].inputs
+        # for input_name in inputs.keys():
+        #     inputs[input_name] = inputs[input_name].to(self.device)
 
-                if 'fake' in input_needed:
-                    net_inputs = [
-                        name + '_fake' if name not in ['mask'] else name
-                        for name in net_inputs]
-                    base_name = '{}_fake'
-                else:
-                    base_name = '{}'
+        inputs_needed = [(inp, loss['detach_input']) for loss in losses
+                         for inp in loss['inputs']]
 
-                for name in input_needed:
-                    inputs = compute_modules(
-                        name, inputs, nets_dict, modules)
+        for input_needed, detach_input in inputs_needed:
+            inputs = compute_modules(
+                input_needed, inputs,
+                self.dict_net,
+                self.modules,
+                self.device,
+                detach_input=detach_input)
 
-                output_name = base_name.format(input_needed)
-                inputs[output_name] = modules[module_name](
-                    **{name: inputs[name] for name in net_inputs})
-                return inputs
-
-            elif input_needed in nets_dict['autoencoder'].outputs:
-                net = nets_dict['autoencoder']
-                for name in net.inputs:
-                    inputs = compute_modules(
-                        name, inputs, nets_dict, modules)
-                return inputs.update(net(**{name: inputs[name]
-                                            for name in net.inputs}))
-            else:
-                for net_name in nets_dict.keys():
-                    if net_name in input_needed:
-                        net = nets_dict[net_name]
-                        break
-                net_inputs = net.inputs
-
-                if 'fake' in input_needed:
-                    net_inputs = [
-                        name + '_fake' if name not in ['mask'] else name
-                        for name in net_inputs]
-                    base_name = '{}_fake_{}'
-                else:
-                    base_name = '{}_{}'
-
-                for name in net_inputs:
-                    inputs = compute_modules(
-                        name, inputs, nets_dict, modules)
-                net_pred = net(**{name: inputs[name] for name in net.inputs})
-                return inputs.update(
-                    {base_name.format(name, net_name): net_pred[name]
-                     for name in net_pred.keys()})
-        else:
-            return inputs
-
-    def get_batch_loss(self, inputs):
-        """ Single forward and backward pass """
-
-        for input_name in inputs.keys():
-            inputs[input_name] = inputs[input_name].to(self.net.device)
-
-        net_pred = self.net(inputs['sh'], inputs['mean_b0'])
-        inputs.update(net_pred)
-
-        inputs_needed = [inp for loss in self.losses for inp in loss['inputs']]
-        inputs = compute_modules(
-            inputs_needed, inputs, {'autoencoder': self.net}, self.modules)
+        loss_dict = {}
 
         batch_loss = []
-        for loss_d in self.losses:
-            loss = loss_d['fun'](*[inputs[name] for name in loss_d['inputs']])
+        for loss_d in losses:
+            loss = loss_d['fun'](*[inputs[params["net"]][params["name"]]
+                                   for params in loss_d['inputs']])
             loss = loss_d['coeff'] * loss
             batch_loss.append(loss)
 
+            loss_dict[loss_d['name']] = loss
         batch_loss = torch.stack(batch_loss, dim=0).sum()
+        loss_dict['batch_loss'] = batch_loss
 
-        return inputs, {'batch_loss': batch_loss}
+        return inputs, loss_dict
 
     def train(self,
+              nets_list,
               train_dataset,
               validation_dataset,
               num_epochs,
               batch_size=128,
               validation=True,
               metrics_final=None,
-              freq_print=None):
+              keep_best_net=True):
 
         dataloader_parameters = {
-            "num_workers": 0,
+            "num_workers": 1,
             "shuffle": True,
             "pin_memory": True,
             "batch_size": batch_size,
@@ -212,85 +220,131 @@ class BaseTrainer():
 
         if metrics_final is None:
             metrics_final = {
-                metric: -np.inf
-                for metric in self.metrics
-            }
-        metrics_epoch = {
-            metric: -np.inf
-            for metric in self.metrics
-        }
+                net_name: {metric: -np.inf
+                           for metric in self.metrics[net_name]}
+                for net_name in nets_list}
 
-        best_value = metrics_final[self.metric_to_maximize]
-        best_net = copy.deepcopy(self.net)
+        metrics_epoch = {net_name:
+                         {metric: -np.inf
+                          for metric in self.metrics[net_name]}
+                         for net_name in nets_list}
+
+        # metrics_train_epoch = {
+        #     net_name: {metric: -np.inf
+        #                for metric in self.metrics[net_name]}
+        #     for net_name in nets_list}
+
+        best_value = {
+            net_name:
+            self.aggregate_metrics(
+                metrics_final[net_name],
+                self.metric_to_maximize[net_name]["inputs"],
+                self.metric_to_maximize[net_name]["agg_fun"])
+            for net_name in nets_list
+        }
+        best_net = {net_name: copy.deepcopy(self.dict_net[net_name])
+                    for net_name in nets_list}
+
         counter_patience = 0
         last_update = None
-        epoch_loss_train = 0
         t = tqdm(range(num_epochs,))
         for epoch, _ in enumerate(t):
             if epoch != 0:
                 t.set_postfix(
                     best_metric=best_value,
-                    metric_epoch=metrics_epoch,
                     last_update=last_update,
-                    loss=epoch_loss_train['batch_loss'],
+                    metrics_val=metrics_epoch,
+                    # metrics_train=metrics_train_epoch,
                 )
 
-            # Training
+            epoch_loss_train = {net_name: {} for net_name in nets_list}
 
-            epoch_loss_train = {}
+            for i, data in tqdm(enumerate(dataloader_train, 0), leave=False):
+                inputs = {net_name: {} for net_name in self.dict_net}
+                inputs["dataset"] = data
 
-            for i, data in tqdm(enumerate(dataloader_train, 0),
-                                total=len(train_dataset) // batch_size +
-                                int(len(train_dataset) % batch_size != 0),
-                                leave=False):
-                self.optimizer.zero_grad()
+                # with torch.autograd.set_detect_anomaly(True):
 
-                # Set network to train mode
-                self.net.train()
+                # Train networks
+                for net_name in nets_list:
+                    self.optimizer[net_name].zero_grad()
 
-                _, batch_losses = self.get_batch_loss(data)
+                    self.dict_net[net_name].train()
 
-                loss = batch_losses['batch_loss']
-                loss.backward()
+                    # with profiler.record_function(net_name + "_backprop"):
+                    inputs, batch_losses = self.get_batch_loss(
+                        self.dict_net[net_name],
+                        inputs,
+                        self.losses[net_name])
 
-                for name, loss in batch_losses.items():
-                    loss = epoch_loss_train.setdefault(name, 0) + loss.item()
-                    epoch_loss_train[name] = loss
+                    loss = batch_losses['batch_loss']
+                    loss.backward(retain_graph=True)
+                    self.optimizer[net_name].step()
+                    self.scheduler[net_name].step()
 
-                # self.net.plot_grad_flow()
+                    for name, loss in batch_losses.items():
+                        loss = loss.item()
+                        loss += epoch_loss_train[net_name].setdefault(
+                            name, 0)
+                        epoch_loss_train[net_name][name] = loss
+                    del batch_losses
+                del inputs
 
-                # gradient descent
-                self.optimizer.step()
+            # print(prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total"))
+            # prof.export_chrome_trace("trace.json")
+            # self.net.plot_grad_flow()
 
-            for name, loss in epoch_loss_train.items():
-                self.writer.add_scalar('loss/' + name,
-                                       loss / (i + 1), epoch)
-                epoch_loss_train[name] = loss / (i + 1)
+            for net_name in epoch_loss_train.keys():
+                self.nb_step[net_name] += 1
+                for name, loss in epoch_loss_train[net_name].items():
+                    self.writer.add_scalar(net_name + '/loss/' + name,
+                                           loss / (i + 1.),
+                                           self.nb_step[net_name])
+                    epoch_loss_train[net_name][name] = loss / (i + 1.)
 
-            # Validation and print
             with torch.no_grad():
+                for net_name in nets_list:
+                    metrics_epoch[net_name] = self.validate(
+                        self.dict_net[net_name],
+                        self.metrics[net_name],
+                        validation_dataset,
+                        batch_size=batch_size)
 
-                metrics_epoch = self.validate(validation_dataset, batch_size)
+                    # metrics_train_epoch[net_name] = self.validate(
+                    #     self.dict_net[net_name],
+                    #     self.metrics[net_name],
+                    #     train_dataset,
+                    #     batch_size=batch_size)
 
-                # if freq_print is not None and (
-                #         epoch % freq_print == 0 and epoch != 0):
-                #     self.print_metrics(validation_dataset, batch_size)
-
-            for name, metric in metrics_epoch.items():
-                self.writer.add_scalar('metric/' + name + '_val',
-                                       metric, epoch)
+                    for name, metric in metrics_epoch[net_name].items():
+                        self.writer.add_scalar(net_name + '/metric/' + name + '_val',
+                                               metric,
+                                               self.nb_step[net_name])
+                    # for name, metric in metrics_train_epoch[net_name].items():
+                    #     self.writer.add_scalar(net_name + '/metric/' + name + '_train',
+                    #                            metric,
+                    #                            self.nb_step[net_name])
 
             if self.save_folder:
-                self.net.save(self.save_folder + str(epoch) + "_net.tar.gz")
+                for net_name in nets_list:
+                    file_name = self.save_folder + net_name
+                    file_name = "{}_{}.tar.gz".format(
+                        file_name, str(self.nb_step[net_name]))
+                    self.dict_net[net_name].save(file_name)
 
-            if metrics_epoch[self.metric_to_maximize] > best_value:
-                best_value = metrics_epoch[self.metric_to_maximize]
-                last_update = epoch
-                best_net = copy.deepcopy(self.net)
-                metrics_final = {
-                    metric: metrics_epoch[metric]
-                    for metric in self.metrics
-                }
+            for net_name in nets_list:
+                actual_value = self.aggregate_metrics(
+                    metrics_epoch[net_name],
+                    self.metric_to_maximize[net_name]["inputs"],
+                    self.metric_to_maximize[net_name]["agg_fun"])
+                if actual_value > best_value[net_name]:
+                    best_value[net_name] = actual_value
+                    last_update = epoch
+                    best_net[net_name] = copy.deepcopy(
+                        self.dict_net[net_name])
+                    metrics_final[net_name] = metrics_epoch[net_name]
+
+            if last_update == epoch:
                 counter_patience = 0
             else:
                 counter_patience += 1
@@ -298,4 +352,17 @@ class BaseTrainer():
             if counter_patience > self.patience:
                 break
 
+        if keep_best_net:
+            for net_name in nets_list:
+                self.dict_net[net_name] = best_net[net_name]
+
         return best_net, metrics_final
+
+    def aggregate_metrics(self, metrics, metrics_name, agg_fun='mean'):
+        if type(agg_fun) is str:
+            if agg_fun == 'mean':
+                agg_fun = np.mean
+            elif agg_fun == 'sum':
+                agg_fun = np.sum
+        result = agg_fun([metrics[name] for name in metrics_name])
+        return result

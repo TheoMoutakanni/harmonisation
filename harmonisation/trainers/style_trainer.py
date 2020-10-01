@@ -159,8 +159,9 @@ class StyleTrainer(BaseTrainer):
             for metric, metric_d in metrics.items():
                 dic[metric] = np.nanmean(
                     metric_d["fun"](
-                        *[torch.FloatTensor(inputs[name])
-                          for name in metric_d['inputs']]
+                        *[torch.FloatTensor(
+                            inputs[params["net"]][input_name])
+                          for input_name, params in metric_d['inputs'].items()]
                     )
                 )
 
@@ -219,14 +220,15 @@ class StyleTrainer(BaseTrainer):
         net_pred = self.net(inputs['sh'], inputs['mean_b0'])
         inputs.update(net_pred)
 
-        inputs_needed = [inp for loss in self.losses + self.style_losses
+        inputs_needed = [(inp, loss['detach_input'])
+                         for loss in self.losses + self.style_losses
                          for inp in loss['inputs']]
-        for input_needed in inputs_needed:
+        for input_needed, detach_input in inputs_needed:
             inputs = compute_modules(
                 input_needed, inputs,
                 {'autoencoder': self.net, **self.adversarial_net},
-                self.modules
-            )
+                self.modules,
+                detach_input=detach_input)
 
         for net_name, adv_net in self.adversarial_net.items():
             if not any(net_name in s for s in inputs_needed):

@@ -81,10 +81,7 @@ class BaseNet(nn.Module, object):
                 res[k] = self.move_to(v, device, numpy=numpy)
             return res
         elif isinstance(obj, list):
-            res = []
-            for v in obj:
-                res.append(self.move_to(v, device, numpy=numpy))
-            return res
+            return [self.move_to(v, device, numpy=numpy) for v in obj]
         else:
             return obj
         # else:
@@ -102,7 +99,7 @@ class BaseNet(nn.Module, object):
             return obj
 
     def to_batch_tensor(self, obj, batch, batch_size):
-        if isinstance(obj, np.ndarray):
+        if isinstance(obj, (list, np.ndarray)):
             return torch.FloatTensor(
                 obj[batch * batch_size:(batch + 1) * batch_size]
             ).to(self.device)
@@ -131,22 +128,31 @@ class BaseNet(nn.Module, object):
                 number_of_batches += int(nb_input % batch_size != 0)
 
                 for batch in tqdm.tqdm(range(number_of_batches), leave=False):
-                    inputs = {
+                    inputs = {net_name: {}
+                              for net_name in list(modules) + list(networks)}
+                    inputs["dataset"] = {
                         signal_name: self.to_batch_tensor(data[signal_name],
                                                           batch, batch_size)
                         for signal_name in data.keys()}
 
                     for input_needed in inputs_needed:
                         inputs = compute_modules(
-                            input_needed, inputs, networks, modules)
+                            input_needed, inputs,
+                            networks, modules,
+                            self.device)
 
-                    # signal_pred = self.forward(
-                    #     *(inputs[name]for name in self.inputs))
                     results[dmri_name].append(
                         self.move_to(
-                            {name: inputs[name] for name in inputs_needed},
+                            {(inp['net'], inp['name']):
+                             inputs[inp['net']][inp['name']]
+                             for inp in inputs_needed},
                             'cpu', numpy=numpy))
-                results[dmri_name] = self.concatenate(results[dmri_name])
+
+                dict_results = {}
+                for k, v in self.concatenate(results[dmri_name]).items():
+                    inp_net, inp_name = k
+                    dict_results.setdefault(inp_net, {})[inp_name] = v
+                results[dmri_name] = dict_results
 
         return results
 

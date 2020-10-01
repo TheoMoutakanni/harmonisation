@@ -263,6 +263,19 @@ def get_metric_fun(metric_specs, device):
         d = dict()
         d['fun'] = metric_dict[specs["type"]](**specs["parameters"]).to(device)
         d['inputs'] = specs['inputs']
+        for input_params in d['inputs']:
+            if "net" not in input_params:
+                input_params["net"] = "dataset"
+            if "detach" not in input_params:
+                input_params["detach"] = False
+            if "recompute" not in input_params:
+                input_params["recompute"] = False
+            if "from" not in input_params:
+                input_params["from"] = "dataset"
         d['type'] = specs['type']
-        metrics[specs['type'] + '_' + specs['inputs'][0]] = d
+
+        input_name = d['inputs'][0]['name']
+        if d['inputs'][0]['from'] != "dataset":
+            input_name += '_' + (d['inputs'][0]['from'])
+        metrics[d['type'] + '_' + input_name] = d
     return metrics

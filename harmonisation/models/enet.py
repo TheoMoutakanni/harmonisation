@@ -820,8 +820,8 @@ class ENet(BaseNet):
         sh_pred = x[..., 1:]
         mean_b0_pred = x[..., :1]
 
-        out_dict['sh_fake'] = sh_pred
+        out_dict['sh'] = sh_pred
         # out_dict['fodf_sh_fake'] = fodf
-        out_dict['mean_b0_fake'] = mean_b0_pred
+        out_dict['mean_b0'] = mean_b0_pred
 
         return out_dict

@@ -2,11 +2,12 @@
 Train an autoencoder with an adversarial loss
 """
 
+from collections import OrderedDict
 from harmonisation.datasets import SHDataset, AdversarialDataset
 from harmonisation.utils import (get_paths_PPMI, get_paths_ADNI, get_paths_SIMON,
                                  train_test_val_split)
 from harmonisation.models.metric_module import FAModule, DWIModule, EigenModule
-from harmonisation.trainers import StyleTrainer
+from harmonisation.trainers import BaseTrainer
 from harmonisation.models import ENet, AdversarialNet
 
 from harmonisation.settings import SIGNAL_PARAMETERS
@@ -131,19 +132,17 @@ TRAINER_PARAMETERS = {
             "lr": 1e-3,
             "weight_decay": 1e-5,
         },
-        "adversarial": {
-            "sites": {
-                "lr": 0.001,
-                "weight_decay": 1e-3,
-                "momentum": 0.9,
-                "nesterov": True,
-            },
-            "discriminator": {
-                "lr": 0.001,
-                "weight_decay": 1e-5,
-                "momentum": 0.9,
-                "nesterov": True,
-            },
+        "sites": {
+            "lr": 0.001,
+            "weight_decay": 1e-3,
+            "momentum": 0.9,
+            "nesterov": True,
+        },
+        "discriminator": {
+            "lr": 0.001,
+            "weight_decay": 1e-5,
+            "momentum": 0.9,
+            "nesterov": True,
         },
     },
     "scheduler_parameters": {
@@ -153,43 +152,53 @@ TRAINER_PARAMETERS = {
             "step_size_up": 1000,
             "cycle_momentum": False,
         },
-        "adversarial": {
-            "sites": {
-                "base_lr": 1e-3,
-                "max_lr": 1e-2,
-                "step_size_up": 1000,
-            },
-            "discriminator": {
-                "base_lr": 1e-3,
-                "max_lr": 1e-2,
-                "step_size_up": 1000,
-            },
-        }
+        "sites": {
+            "base_lr": 1e-3,
+            "max_lr": 1e-2,
+            "step_size_up": 1000,
+        },
+        "discriminator": {
+            "base_lr": 1e-3,
+            "max_lr": 1e-2,
+            "step_size_up": 1000,
+        },
     },
     "modules": modules,
     "loss_specs": {
         "autoencoder": [
             {
                 "type": "mse",
-                "inputs": ["sh_fake", "sh", "mask"],
+                "inputs": [
+                    {"name": "sh", "net": "autoencoder"},
+                    {"name": "sh"},
+                    {"name": "mask"}],
                 "parameters": {},
                 "coeff": 1.,
             },
             {
                 "type": "mse",
-                "inputs": ["dwi_fake", "dwi", "mask"],
+                "inputs": [
+                    {"name": "dwi", "from": "autoencoder"},
+                    {"name": "dwi"},
+                    {"name": "mask"}],
                 "parameters": {},
                 "coeff": 1e-4,
             },
             {
                 "type": "mse",
-                "inputs": ["mean_b0_fake", "mean_b0", "mask"],
+                "inputs": [
+                    {"name": "mean_b0", "net": "autoencoder"},
+                    {"name": "mean_b0"},
+                    {"name": "mask"}],
                 "parameters": {},
                 "coeff": 10.,
             },
             {
                 "type": "mse",
-                "inputs": ["fa_fake", "fa", "mask"],
+                "inputs": [
+                    {"name": "fa", "from": "autoencoder"},
+                    {"name": "fa"},
+                    {"name": "mask"}],
                 "parameters": {},
                 "coeff": 10.,
             },
@@ -230,108 +239,115 @@ TRAINER_PARAMETERS = {
             #     "coeff": 1.,
             # },
         ],
-        "style": [],
-        "adversarial": {
-            "sites": [
-                {
-                    "type": "cross_entropy",
-                    "inputs": ["y_logits_sites", "site"],
-                    "parameters": {},
-                    "coeff": 1,
-                }],
-            "discriminator": [
-                {
-                    "type": "bce_logits_ones",
-                    "inputs": ["y_logits_discriminator"],
-                    "parameters": {},
-                    "coeff": 1,
-                },
-                {
-                    "type": "bce_logits_zeros",
-                    "inputs": ["y_logits_fake_discriminator"],
-                    "parameters": {},
-                    "coeff": 1,
-                }]
-        }
+        "sites": [
+            {
+                "type": "cross_entropy",
+                "inputs": [
+                    {"name": "y_logits", "net": "sites"},
+                    {"name": "site"}],
+                "detach_input": True,
+                "parameters": {},
+                "coeff": 1,
+            }],
+        "discriminator": [
+            {
+                "type": "bce_logits_ones",
+                "inputs": [
+                    {"name": "y_logits", "net": "discriminator"}],
+                "detach_input": True,
+                "parameters": {},
+                "coeff": 1,
+            },
+            {
+                "type": "bce_logits_zeros",
+                "inputs": [
+                    {"name": "y_logits", "net": "discriminator",
+                     "from": "autoencoder"}],
+                "detach_input": True,
+                "parameters": {},
+                "coeff": 1,
+            }]
     },
     "metrics_specs": {
         "autoencoder": [
             {
                 "type": "acc",
-                "inputs": ["sh", "sh_fake", "mask"],
+                "inputs": [
+                    {"name": "sh", "net": "autoencoder"},
+                    {"name": "sh"},
+                    {"name": "mask"}],
                 "parameters": {}
             },
             {
                 "type": "mse",
-                "inputs": ["sh", "sh_fake", "mask"],
+                "inputs": [
+                    {"name": "sh", "net": "autoencoder"},
+                    {"name": "sh"},
+                    {"name": "mask"}],
                 "parameters": {}
             }],
-        "adversarial": {
-            "sites": [
-                {
-                    "type": "accuracy",
-                    "inputs": ["y_logits_sites", "site"],
-                    "parameters": {}
-                }],
-            "discriminator": [
-                {
-                    "type": "accuracy",
-                    "inputs": ["y_logits_discriminator"],
-                    "parameters": {"force_label": 1}
-                },
-                {
-                    "type": "accuracy",
-                    "inputs": ["y_logits_fake_discriminator"],
-                    "parameters": {"force_label": 0}
-                },
-            ]},
+        "sites": [
+            {
+                "type": "accuracy",
+                "inputs": [
+                    {"name": "y_logits", "net": "sites"},
+                    {"name": "site"}],
+                "parameters": {}
+            }],
+        "discriminator": [
+            {
+                "type": "accuracy",
+                "inputs": [
+                    {"name": "y_logits", "net": "discriminator"}],
+                "parameters": {"force_label": 1}
+            },
+            {
+                "type": "accuracy",
+                "inputs": [
+                    {"name": "y_logits", "net": "discriminator",
+                     "from": "autoencoder"}],
+                "parameters": {"force_label": 0}
+            }],
     },
     "metric_to_maximize": {
-        "autoencoder": {"agg_fun": "mean", "inputs": ["mse_sh"]},
-        "adversarial": {
-            "sites": {
-                "agg_fun": "mean",
-                "inputs": ["accuracy_y_logits_sites"]
-            },
-            "discriminator": {
-                "agg_fun": "mean",
-                "inputs": ["accuracy_y_logits_discriminator",
-                           "accuracy_y_logits_fake_discriminator"]
-            },
-        }
+        "autoencoder": {
+            "agg_fun": "mean",
+            "inputs": {"mse_sh": {}}
+        },
+        "sites": {
+            "agg_fun": "mean",
+            "inputs": {"accuracy_y_logits": {"net": "sites"}}
+        },
+        "discriminator": {
+            "agg_fun": "mean",
+            "inputs": {
+                "accuracy_y_logits": {"net": "discriminator"},
+                "accuracy_y_logits_autoencoder": {"net": "discriminator",
+                                                  "from": "autoencoder"}
+            }
+        },
     },
     "patience": 100,
     "save_folder": save_folder,
 }
 
-style_trainer = StyleTrainer(
-    net,
-    {'sites': sites_net, 'discriminator': discriminator_net},
+style_trainer = BaseTrainer(
+    {'autoencoder': net,
+     'sites': sites_net,
+     'discriminator': discriminator_net},
     **TRAINER_PARAMETERS
 )
 
-# Train both networks each epoch
-
-nets, adv_metrics = style_trainer.train_adversarial_net(
-    ['sites'],
-    train_dataset,
-    validation_dataset,
-    num_epochs=60,
-    batch_size=100,
-    validation=True)
-sites_net = nets['sites']
-
-# nets, adv_metrics = style_trainer.train_adversarial_net(
-#     [],
+# nets, adv_metrics = style_trainer.train(
+#     ['sites'],
 #     train_dataset,
 #     validation_dataset,
-#     num_epochs=1,
-#     train_net_X_time=1,
-#     batch_size=8,
+#     num_epochs=60,
+#     batch_size=192,
 #     validation=True)
-# net = style_trainer.net
+# sites_net = nets['sites']
 
-# nets, adv_metrics = style_trainer.train_adversarial_net(
+# nets, adv_metrics = style_trainer.train(
 #     ['discriminator'],
 #     train_dataset,
 #     validation_dataset,
@@ -385,74 +401,76 @@ style_losses = []
 style_losses += [
     {
         "type": "cross_entropy",
-        "inputs": ["y_logits_fake_sites", "site"],
+        "inputs": [
+            {"name": "y_logits", "net": "sites",
+             "from": "autoencoder", "recompute": True},
+            {"name": "site"}],
         "parameters": {"smoothing": 0.1},
         "coeff": -100.,
     },
     {
         "type": "bce_logits_ones",
-        "inputs": ["y_logits_fake_discriminator"],
+        "inputs": [
+            {"name": "y_logits", "net": "discriminator",
+             "from": "autoencoder", "recompute": True}
+        ],
         "parameters": {},
         "coeff": 20.,
     }
 ]
 
-
-# fa = []
-
-# style_losses += [
-#     {"type": "hist",
-#      "inputs": ["fa_fake"],
-#      "parameters": {"data": fa,
-#                     "bins": 25,
-#                     "min": 0.,
-#                     "max": 1.,
-#                     "scale": 100.,
-#                     "sigma": None},
-#      "coeff": 10.,
-#      }
-# ]
-
-style_trainer.set_style_loss(style_losses)
-style_trainer.set_adversarial_loss(
+style_trainer.set_loss({'autoencoder': style_losses}, add=True)
+style_trainer.set_loss(
     {'sites':
-        [
-            # {
-            #     "type": "cross_entropy",
-            #     "inputs": ["y_logits", "site"],
-            #     "parameters": {"smoothing": 0.1},
-            #     "coeff": 1,
-            # },
-            {
-                "type": "cross_entropy",
-                "inputs": ["y_logits_fake_sites", "site"],
-                "parameters": {},
-                "coeff": 1,
-            }]
-     }
+     [
+         # {
+         #     "type": "cross_entropy",
+         #     "inputs": OrderedDict({
+         #            "y_logits": {"net": "sites"},
+         #            "site": {},
+         #        }),
+         #     "parameters": {"smoothing": 0.1},
+         #     "coeff": 1,
+         # },
+         {
+             "type": "cross_entropy",
+             "inputs": [
+                 {"name": "y_logits", "net": "sites", "from": "autoencoder"},
+                 {"name": "site"}],
+             "detach_input": True,
+             "parameters": {},
+             "coeff": 1,
+         }]
+     },
+    add=False,
 )
-style_trainer.set_adversarial_metric(
+style_trainer.set_metric(
     {"sites": [
         {
             "type": "accuracy",
-                    "inputs": ["y_logits_sites", "site"],
-                    "parameters": {}
+                    "inputs": [
+                        {"name": "y_logits", "net": "sites"},
+                        {"name": "site"}],
+            "parameters": {}
         },
         {
             "type": "accuracy",
-                    "inputs": ["y_logits_fake_sites", "site"],
-                    "parameters": {}
+                    "inputs": [
+                        {"name": "y_logits", "net": "sites",
+                         "from": "autoencoder"},
+                        {"name": "site"}],
+            "parameters": {}
         }],
-     }
+     },
+    add=False,
 )
 
-best_nets, metrics = style_trainer.train_adversarial_net(
-    ["sites", "discriminator"],
+best_nets, metrics = style_trainer.train(
+    ["sites", "discriminator", "autoencoder"],
     train_dataset,
     validation_dataset,
-    train_net_X_time=1,
     num_epochs=60,
-    batch_size=16,
+    batch_size=48,
     keep_best_net=False)
 
 

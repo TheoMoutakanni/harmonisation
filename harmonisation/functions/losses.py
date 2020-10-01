@@ -109,6 +109,7 @@ class NegativefODFLoss(nn.Module):
     Only a subsample of the original 3D matrices is taken to fasten the
     computation and reduce memory consumption (the sphere has 362 directions)
     """
+
     def __init__(self, gtab, response, sh_order, lambda_=1, tau=0.1,
                  size=3, method='center'):
         """
@@ -180,6 +181,7 @@ class NegativefODFLoss(nn.Module):
 
 class GFAMSELoss(nn.Module):
     """MSE of the gfa values computed on X and Z"""
+
     def __init__(self):
         super(GFAMSELoss, self).__init__()
 
@@ -189,6 +191,7 @@ class GFAMSELoss(nn.Module):
 
 class APMSELoss(nn.Module):
     """MSE of the anisotropic power values computed on X and Z"""
+
     def __init__(self):
         super(APMSELoss, self).__init__()
 
@@ -199,6 +202,7 @@ class APMSELoss(nn.Module):
 class RISMSELoss(nn.Module):
     """MSE of the Rotational Invariant Spherical features values
     computed on X and Z"""
+
     def __init__(self):
         super(RISMSELoss, self).__init__()
 
@@ -209,6 +213,7 @@ class RISMSELoss(nn.Module):
 class onlyones_BCEWithLogitsLoss(nn.Module):
     """BCE with logits but only for values with label=1
     Used to ease the construction of the training scheme in settings.py"""
+
     def __init__(self, weight=None, pos_weight=None, reduction='mean'):
         super(onlyones_BCEWithLogitsLoss, self).__init__()
         self.weight = weight
@@ -227,6 +232,7 @@ class onlyones_BCEWithLogitsLoss(nn.Module):
 class onlyzeros_BCEWithLogitsLoss(nn.Module):
     """BCE with logits but only for values with label=0
     Used to ease the construction of the training scheme in settings.py"""
+
     def __init__(self, weight=None, pos_weight=None, reduction='mean'):
         super(onlyzeros_BCEWithLogitsLoss, self).__init__()
         self.weight = weight
@@ -512,7 +518,25 @@ def get_loss_fun(loss_specs, device):
         d = dict()
         d['fun'] = loss_dict[specs["type"]](**specs["parameters"]).to(device)
         d['inputs'] = specs['inputs']
+        for input_params in d['inputs']:
+            if "net" not in input_params:
+                input_params["net"] = "dataset"
+            if "detach" not in input_params:
+                input_params["detach"] = False
+            if "recompute" not in input_params:
+                input_params["recompute"] = False
+            if "from" not in input_params:
+                input_params["from"] = "dataset"
+        if 'detach_input' not in specs:
+            d['detach_input'] = False
+        else:
+            d['detach_input'] = specs['detach_input']
         d['coeff'] = specs['coeff']
         d['type'] = specs['type']
+
+        input_name = d['inputs'][0]['name']
+        if d['inputs'][0]['from'] != "dataset":
+            input_name += '_' + (d['inputs'][0]['from'])
+        d['name'] = d['type'] + '_' + input_name
         losses.append(d)
     return losses
